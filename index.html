@@ -1,0 +1,616 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EA League | Staff Portal</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;500;700;900&family=Rajdhani:wght@300;500;700&display=swap" rel="stylesheet">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Rajdhani', 'sans-serif'],
+                        display: ['Orbitron', 'sans-serif'],
+                    },
+                    colors: {
+                        brand: {
+                            dark: '#050505',
+                            panel: '#0f1115',
+                            accent: '#10b981',
+                            glow: '#34d399',
+                            dim: '#064e3b'
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        body {
+            background-color: #050505;
+            color: #e2e8f0;
+            overflow-x: hidden;
+        }
+        
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #0f1115; 
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #10b981; 
+            border-radius: 4px;
+        }
+
+        .glass-panel {
+            background: rgba(15, 17, 21, 0.7);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(16, 185, 129, 0.2);
+        }
+        
+        .glass-nav {
+            background: rgba(5, 5, 5, 0.85);
+            backdrop-filter: blur(10px);
+            border-bottom: 1px solid rgba(16, 185, 129, 0.3);
+        }
+
+        .input-field {
+            background: rgba(0, 0, 0, 0.4);
+            border: 1px solid #334155;
+            color: white;
+            transition: all 0.3s ease;
+        }
+        .input-field:focus {
+            border-color: #10b981;
+            box-shadow: 0 0 15px rgba(16, 185, 129, 0.2);
+            outline: none;
+        }
+
+        .loading {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid rgba(255,255,255,.3);
+            border-radius: 50%;
+            border-top-color: #10b981;
+            animation: spin 1s ease-in-out infinite;
+        }
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .expand-content {
+            max-height: 0;
+            overflow: hidden;
+            transition: max-height 0.4s ease-out, opacity 0.4s ease-out;
+            opacity: 0;
+        }
+        .expand-content.open {
+            max-height: 500px;
+            opacity: 1;
+        }
+    </style>
+</head>
+<body class="antialiased min-h-screen bg-black">
+
+    <!-- Navigation -->
+    <nav class="fixed w-full z-50 glass-nav">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex items-center justify-between h-20">
+                <div class="flex-shrink-0">
+                    <span class="font-display font-black text-3xl tracking-tighter text-white">
+                        EA <span class="text-emerald-500">LEAGUE</span>
+                    </span>
+                </div>
+                <div class="flex items-center gap-4">
+                    <a href="index.html" class="text-gray-400 hover:text-white transition-colors">
+                        <i class="fas fa-home mr-2"></i>Back to Site
+                    </a>
+                    <button id="logoutBtn" onclick="staffLogout()" class="hidden text-red-400 hover:text-red-300 font-bold">
+                        <i class="fas fa-sign-out-alt mr-2"></i>Logout
+                    </button>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Login View -->
+    <div id="login-view" class="pt-32 pb-20 px-4">
+        <div class="max-w-md mx-auto">
+            <div class="glass-panel rounded-2xl p-8 border border-emerald-500/30 shadow-[0_0_30px_rgba(16,185,129,0.1)]">
+                <div class="text-center mb-8">
+                    <div class="w-20 h-20 bg-emerald-900/50 rounded-full flex items-center justify-center mx-auto mb-6 border-2 border-emerald-500/50">
+                        <i class="fas fa-shield-alt text-3xl text-emerald-400"></i>
+                    </div>
+                    <h1 class="text-3xl font-display font-bold text-white mb-2">Staff Portal</h1>
+                    <p class="text-gray-400">Authorized personnel only</p>
+                </div>
+                
+                <form onsubmit="return handleStaffLogin(event)" class="space-y-6">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-400 mb-2">Username</label>
+                        <input type="text" id="staffUser" required class="w-full input-field rounded-lg p-3" autocomplete="off">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-400 mb-2">Password</label>
+                        <input type="password" id="staffPass" required class="w-full input-field rounded-lg p-3">
+                    </div>
+                    <button type="submit" id="loginBtn" class="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-3 rounded-lg transition-all flex items-center justify-center gap-2">
+                        <span>Access Dashboard</span>
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Dashboard View -->
+    <div id="dashboard-view" class="hidden pt-24 pb-12 px-4">
+        <div class="max-w-7xl mx-auto">
+            <!-- Header -->
+            <div class="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 gap-4">
+                <div>
+                    <h1 class="text-3xl font-display font-bold text-white">Admin Dashboard</h1>
+                    <p class="text-emerald-400">Welcome, <span id="staffNameDisplay">Admin</span></p>
+                </div>
+                <div class="flex items-center gap-3">
+                    <div class="bg-black/40 px-3 py-1 rounded border border-emerald-500/30 flex items-center gap-2">
+                        <span class="w-2 h-2 bg-emerald-500 rounded-full animate-pulse"></span>
+                        <span class="text-xs text-gray-300 font-bold">Staff Online</span>
+                    </div>
+                    <button onclick="manualRefresh()" class="bg-gray-700 hover:bg-gray-600 text-white px-3 py-1 rounded text-sm font-bold" title="Refresh Data">
+                        <i class="fas fa-sync-alt"></i>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Stats -->
+            <div class="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
+                <div class="glass-panel p-4 rounded-lg border border-gray-700">
+                    <div class="text-gray-400 text-xs uppercase font-bold">Pending Apps</div>
+                    <div class="text-2xl font-bold text-white mt-1" id="stat-apps">0</div>
+                </div>
+                <div class="glass-panel p-4 rounded-lg border border-gray-700">
+                    <div class="text-gray-400 text-xs uppercase font-bold">Open Tickets</div>
+                    <div class="text-2xl font-bold text-white mt-1" id="stat-tickets">0</div>
+                </div>
+                <div class="glass-panel p-4 rounded-lg border border-gray-700">
+                    <div class="text-gray-400 text-xs uppercase font-bold">Total Apps</div>
+                    <div class="text-2xl font-bold text-white mt-1" id="stat-total-apps">0</div>
+                </div>
+                <div class="glass-panel p-4 rounded-lg border border-emerald-500/30 cursor-pointer hover:bg-emerald-900/20 transition-colors" onclick="toggleAnnouncementForm()">
+                    <div class="text-emerald-400 text-xs uppercase font-bold"><i class="fas fa-bullhorn mr-1"></i> Action</div>
+                    <div class="text-lg font-bold text-white mt-1">Send Announcement</div>
+                </div>
+            </div>
+
+            <!-- Announcement Form -->
+            <div id="announcement-form" class="hidden mb-8 glass-panel p-6 rounded-lg border border-emerald-500/30">
+                <h3 class="text-lg font-bold text-white mb-4">Send Global Announcement</h3>
+                <div class="space-y-4">
+                    <input type="text" id="newAnnTitle" placeholder="Announcement Title" class="w-full input-field rounded-lg p-3">
+                    <textarea id="newAnnBody" placeholder="Message content..." rows="3" class="w-full input-field rounded-lg p-3"></textarea>
+                    <div class="flex gap-2">
+                        <button onclick="postNewAnnouncement()" id="postAnnBtn" class="bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded-lg font-bold">
+                            Send to Main Site
+                        </button>
+                        <button onclick="toggleAnnouncementForm()" class="bg-gray-700 hover:bg-gray-600 text-white px-4 py-2 rounded-lg font-bold">Cancel</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Main Content Grid -->
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                <!-- Applications -->
+                <div class="glass-panel rounded-lg p-6 border border-gray-800">
+                    <h3 class="text-lg font-bold text-white mb-4 border-l-4 border-emerald-500 pl-3">Applications</h3>
+                    <div class="space-y-3 max-h-[600px] overflow-y-auto pr-2" id="admin-apps-list">
+                        <div class="text-center text-gray-500 py-4">Loading...</div>
+                    </div>
+                </div>
+
+                <!-- Tickets -->
+                <div class="glass-panel rounded-lg p-6 border border-gray-800">
+                    <h3 class="text-lg font-bold text-white mb-4 border-l-4 border-blue-500 pl-3">Support Tickets</h3>
+                    <div class="space-y-3 max-h-[600px] overflow-y-auto pr-2" id="admin-tickets-list">
+                        <div class="text-center text-gray-500 py-4">Loading...</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // ==========================================
+        // CONFIGURATION - SAME AS MAIN SITE
+        // ==========================================
+        
+        const BIN_ID = '69aa217643b1c97be9b7f444';
+        const MASTER_KEY = '$2a$10$GK8JfB9MpM7nksbKiYequemSxDWTeB.S/B0aVN3XtmLU9amuwpwgO';
+        
+        const READ_URL = `https://api.jsonbin.io/v3/b/${BIN_ID}/latest`;
+        const UPDATE_URL = `https://api.jsonbin.io/v3/b/${BIN_ID}`;
+
+        // ==========================================
+        // STAFF AUTHENTICATION
+        // ==========================================
+        
+        const STAFF_USERS = {
+            'admin': { password: 'admin123', name: 'EA JODECI', role: 'Owner' },
+            'mod': { password: 'mod123', name: 'EA Support', role: 'Moderator' }
+        };
+
+        let currentStaff = null;
+        let autoRefreshInterval = null;
+
+        async function handleStaffLogin(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            
+            const u = document.getElementById('staffUser').value;
+            const p = document.getElementById('staffPass').value;
+            
+            if (STAFF_USERS[u] && STAFF_USERS[u].password === p) {
+                currentStaff = STAFF_USERS[u];
+                document.getElementById('login-view').classList.add('hidden');
+                document.getElementById('dashboard-view').classList.remove('hidden');
+                document.getElementById('logoutBtn').classList.remove('hidden');
+                document.getElementById('staffNameDisplay').innerText = currentStaff.name;
+                
+                await renderAdminData();
+                
+                autoRefreshInterval = setInterval(() => {
+                    renderAdminData();
+                }, 10000); // Refresh every 10 seconds
+            } else {
+                alert('Invalid Credentials');
+            }
+            
+            return false;
+        }
+
+        function staffLogout() {
+            currentStaff = null;
+            document.getElementById('dashboard-view').classList.add('hidden');
+            document.getElementById('login-view').classList.remove('hidden');
+            document.getElementById('logoutBtn').classList.add('hidden');
+            document.getElementById('staffUser').value = '';
+            document.getElementById('staffPass').value = '';
+            
+            if (autoRefreshInterval) {
+                clearInterval(autoRefreshInterval);
+                autoRefreshInterval = null;
+            }
+        }
+
+        // ==========================================
+        // API FUNCTIONS
+        // ==========================================
+        
+        async function getData() {
+            try {
+                const response = await fetch(READ_URL, {
+                    method: 'GET',
+                    headers: { 'X-Master-Key': MASTER_KEY }
+                });
+                
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                const result = await response.json();
+                return result.record || { apps: [], tickets: [], announcements: [] };
+                
+            } catch (error) {
+                console.error('Error fetching data:', error);
+                alert('Failed to connect to database');
+                return { apps: [], tickets: [], announcements: [] };
+            }
+        }
+        
+        async function saveData(data) {
+            try {
+                const response = await fetch(UPDATE_URL, {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-Master-Key': MASTER_KEY
+                    },
+                    body: JSON.stringify(data)
+                });
+                
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                return true;
+                
+            } catch (error) {
+                console.error('Error saving data:', error);
+                alert('Failed to save data');
+                return false;
+            }
+        }
+
+        // ==========================================
+        // ANNOUNCEMENT FUNCTIONS
+        // ==========================================
+        
+        function toggleAnnouncementForm() {
+            const form = document.getElementById('announcement-form');
+            form.classList.toggle('hidden');
+        }
+
+        async function postNewAnnouncement() {
+            const title = document.getElementById('newAnnTitle').value.trim();
+            const body = document.getElementById('newAnnBody').value.trim();
+            
+            if (!title || !body) {
+                alert('Please fill in all fields');
+                return;
+            }
+            
+            const btn = document.getElementById('postAnnBtn');
+            const originalText = btn.innerHTML;
+            btn.innerHTML = '<div class="loading"></div>';
+            btn.disabled = true;
+            
+            const data = await getData();
+            
+            // Add new announcement
+            data.announcements = data.announcements || [];
+            data.announcements.push({ 
+                title: title, 
+                body: body, 
+                date: new Date().toISOString(),
+                postedBy: currentStaff ? currentStaff.name : 'Unknown',
+                id: Date.now()
+            });
+            
+            // Keep only last 10 announcements to prevent bloat
+            if (data.announcements.length > 10) {
+                data.announcements = data.announcements.slice(-10);
+            }
+            
+            const success = await saveData(data);
+            
+            btn.innerHTML = originalText;
+            btn.disabled = false;
+            
+            if (success) {
+                alert('Announcement sent to main website!');
+                document.getElementById('newAnnTitle').value = '';
+                document.getElementById('newAnnBody').value = '';
+                toggleAnnouncementForm();
+            }
+        }
+
+        // ==========================================
+        // DASHBOARD FUNCTIONS
+        // ==========================================
+        
+        async function manualRefresh() {
+            const btn = document.querySelector('button[onclick="manualRefresh()"] i');
+            btn.classList.add('fa-spin');
+            await renderAdminData();
+            setTimeout(() => btn.classList.remove('fa-spin'), 1000);
+        }
+
+        const EXPAND_STORAGE_KEY = 'ea_staff_expanded_items';
+
+        function loadExpandedState() {
+            const stored = localStorage.getItem(EXPAND_STORAGE_KEY);
+            return stored ? JSON.parse(stored) : {};
+        }
+
+        function saveExpandedState(state) {
+            localStorage.setItem(EXPAND_STORAGE_KEY, JSON.stringify(state));
+        }
+
+        window.toggleExpand = function(id) {
+            const el = document.getElementById(id);
+            const icon = document.getElementById(id + '-icon');
+            const expandedState = loadExpandedState();
+            
+            if (el.classList.contains('open')) {
+                el.classList.remove('open');
+                if(icon) {
+                    icon.classList.remove('fa-chevron-up');
+                    icon.classList.add('fa-chevron-down');
+                }
+                delete expandedState[id];
+            } else {
+                el.classList.add('open');
+                if(icon) {
+                    icon.classList.remove('fa-chevron-down');
+                    icon.classList.add('fa-chevron-up');
+                }
+                expandedState[id] = true;
+            }
+            saveExpandedState(expandedState);
+        }
+
+        async function renderAdminData() {
+            const data = await getData();
+            const apps = data.apps || [];
+            const tickets = data.tickets || [];
+            
+            // Update stats
+            document.getElementById('stat-apps').innerText = apps.filter(a => a.status === 'Pending').length;
+            document.getElementById('stat-tickets').innerText = tickets.filter(t => t.status === 'Open' || t.status === 'Pending Staff').length;
+            document.getElementById('stat-total-apps').innerText = apps.length;
+
+            const expandedState = loadExpandedState();
+
+            // Render Applications
+            const appContainer = document.getElementById('admin-apps-list');
+            if (apps.length === 0) {
+                appContainer.innerHTML = '<div class="text-center text-gray-500 py-4">No applications yet</div>';
+            } else {
+                appContainer.innerHTML = apps.slice().reverse().map(app => {
+                    const isExpanded = !!expandedState[`app-${app.id}`];
+                    return `
+                    <div class="bg-black/30 p-3 rounded border-l-2 ${app.status === 'Pending' ? 'border-yellow-500' : app.status === 'Approved' ? 'border-emerald-500' : 'border-red-500'}">
+                        <div class="flex justify-between items-start cursor-pointer" onclick="toggleExpand('app-${app.id}')">
+                            <div class="flex-1">
+                                <div class="text-white font-bold text-sm flex items-center gap-2">
+                                    ${app.discord}
+                                    <span class="text-xs px-2 py-0.5 rounded bg-gray-800 text-gray-300">${app.status}</span>
+                                    <i id="app-${app.id}-icon" class="fas ${isExpanded ? 'fa-chevron-up' : 'fa-chevron-down'} text-gray-500 text-xs"></i>
+                                </div>
+                                <div class="text-gray-500 text-xs mt-1">${app.team} | ${app.rank} | ${app.date}</div>
+                            </div>
+                            <div class="flex gap-1" onclick="event.stopPropagation()">
+                                ${app.status === 'Pending' ? `
+                                    <button onclick="updateAppStatus(${app.id}, 'Approved')" class="text-emerald-400 hover:text-white text-xs bg-emerald-900/30 px-2 py-1 rounded" title="Approve">
+                                        <i class="fas fa-check"></i>
+                                    </button>
+                                    <button onclick="updateAppStatus(${app.id}, 'Denied')" class="text-red-400 hover:text-white text-xs bg-red-900/30 px-2 py-1 rounded" title="Deny">
+                                        <i class="fas fa-times"></i>
+                                    </button>
+                                ` : `
+                                    <button onclick="updateAppStatus(${app.id}, 'Pending')" class="text-yellow-400 hover:text-white text-xs bg-yellow-900/30 px-2 py-1 rounded" title="Reset to Pending">
+                                        <i class="fas fa-undo"></i>
+                                    </button>
+                                `}
+                            </div>
+                        </div>
+                        
+                        <div id="app-${app.id}" class="expand-content ${isExpanded ? 'open' : ''} mt-2 pt-2 border-t border-gray-700">
+                            <div class="grid grid-cols-2 gap-2 text-xs mb-2">
+                                <div><span class="text-gray-500">Uplay:</span> <span class="text-gray-300">${app.uplay}</span></div>
+                                <div><span class="text-gray-500">Date:</span> <span class="text-gray-300">${app.date}</span></div>
+                            </div>
+                            <div class="bg-gray-900/50 p-2 rounded text-xs">
+                                <span class="text-gray-500 block mb-1">Reason:</span>
+                                <p class="text-gray-300">"${app.reason}"</p>
+                            </div>
+                            ${app.reviewedBy ? `<div class="text-xs text-gray-500 mt-2">Reviewed by: ${app.reviewedBy} on ${app.reviewedAt}</div>` : ''}
+                        </div>
+                    </div>
+                    `;
+                }).join('');
+            }
+
+            // Render Tickets
+            const ticketContainer = document.getElementById('admin-tickets-list');
+            if (tickets.length === 0) {
+                ticketContainer.innerHTML = '<div class="text-center text-gray-500 py-4">No tickets yet</div>';
+            } else {
+                ticketContainer.innerHTML = tickets.slice().reverse().map(t => {
+                    const isExpanded = !!expandedState[`ticket-${t.id}`];
+                    return `
+                    <div class="bg-black/30 p-3 rounded border-l-2 ${t.status === 'Open' ? 'border-red-500' : t.status === 'Pending Staff' ? 'border-yellow-500' : 'border-gray-600'}">
+                        <div class="flex justify-between items-start cursor-pointer" onclick="toggleExpand('ticket-${t.id}')">
+                            <div class="flex-1">
+                                <div class="text-white font-bold text-sm flex items-center gap-2">
+                                    ${t.subject}
+                                    <span class="text-[10px] text-gray-500 border border-gray-700 px-1 rounded">${t.id}</span>
+                                    <span class="text-xs px-2 py-0.5 rounded bg-gray-800 text-gray-300">${t.status}</span>
+                                    <i id="ticket-${t.id}-icon" class="fas ${isExpanded ? 'fa-chevron-up' : 'fa-chevron-down'} text-gray-500 text-xs"></i>
+                                </div>
+                                <div class="text-gray-500 text-xs mt-1">By: ${t.discord} | ${new Date(t.date).toLocaleString()}</div>
+                            </div>
+                            <div class="flex gap-1" onclick="event.stopPropagation()">
+                                ${t.status !== 'Closed' ? `
+                                    <button onclick="closeTicket('${t.id}')" class="text-gray-400 hover:text-white text-xs bg-gray-800 px-2 py-1 rounded" title="Close Ticket">
+                                        <i class="fas fa-lock"></i>
+                                    </button>
+                                ` : `
+                                    <button onclick="reopenTicket('${t.id}')" class="text-emerald-400 hover:text-white text-xs bg-emerald-900/30 px-2 py-1 rounded" title="Reopen">
+                                        <i class="fas fa-lock-open"></i>
+                                    </button>
+                                `}
+                            </div>
+                        </div>
+
+                        <div id="ticket-${t.id}" class="expand-content ${isExpanded ? 'open' : ''} mt-2 pt-2 border-t border-gray-700">
+                            <div class="text-gray-400 text-xs mb-3 bg-black/20 p-2 rounded">
+                                ${t.description}
+                            </div>
+                            
+                            <div class="space-y-2 mb-3 max-h-40 overflow-y-auto pr-1">
+                                ${t.responses && t.responses.length > 0 ? t.responses.map(r => `
+                                    <div class="text-xs ${r.sender === 'User' ? 'text-left' : 'text-right'}">
+                                        <span class="text-gray-600 block mb-0.5">${r.sender} • ${new Date(r.date).toLocaleTimeString()}</span>
+                                        <span class="inline-block px-2 py-1 rounded ${r.sender === 'User' ? 'bg-gray-800 text-gray-300' : 'bg-emerald-900/40 text-emerald-200'}">${r.text}</span>
+                                    </div>
+                                `).join('') : '<p class="text-gray-600 italic text-xs">No messages yet.</p>'}
+                            </div>
+
+                            <div class="flex gap-2 mt-2">
+                                <input type="text" id="admin-reply-${t.id}" placeholder="Type your response..." 
+                                    class="flex-1 bg-gray-900 border border-gray-700 rounded px-2 py-1 text-xs text-white focus:border-emerald-500 focus:outline-none">
+                                <button onclick="event.stopPropagation(); addAdminReply('${t.id}')" 
+                                    class="bg-emerald-700 hover:bg-emerald-600 text-white px-3 py-1 rounded text-xs font-bold">
+                                    Reply
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                    `;
+                }).join('');
+            }
+        }
+
+        async function updateAppStatus(id, status) {
+            const data = await getData();
+            const app = data.apps.find(a => a.id === id);
+            if (app) {
+                app.status = status;
+                app.reviewedBy = currentStaff ? currentStaff.name : 'Unknown';
+                app.reviewedAt = new Date().toLocaleString();
+                await saveData(data);
+                await renderAdminData();
+            }
+        }
+
+        async function addAdminReply(ticketId) {
+            const input = document.getElementById(`admin-reply-${ticketId}`);
+            const text = input.value.trim();
+            if (!text) return;
+            
+            const data = await getData();
+            const ticket = data.tickets.find(t => t.id === ticketId);
+            
+            if (ticket) {
+                if (!ticket.responses) ticket.responses = [];
+                ticket.responses.push({ 
+                    text: text, 
+                    sender: currentStaff ? currentStaff.name : 'Staff', 
+                    date: new Date().toISOString() 
+                });
+                ticket.status = 'Pending User';
+                await saveData(data);
+                await renderAdminData();
+            }
+        }
+
+        async function closeTicket(ticketId) {
+            const data = await getData();
+            const ticket = data.tickets.find(t => t.id === ticketId);
+            if(ticket) {
+                ticket.status = 'Closed';
+                ticket.closedBy = currentStaff ? currentStaff.name : 'Unknown';
+                ticket.closedAt = new Date().toLocaleString();
+                await saveData(data);
+                await renderAdminData();
+            }
+        }
+
+        async function reopenTicket(ticketId) {
+            const data = await getData();
+            const ticket = data.tickets.find(t => t.id === ticketId);
+            if(ticket) {
+                ticket.status = 'Open';
+                await saveData(data);
+                await renderAdminData();
+            }
+        }
+
+        // Initialize button text for loading states
+        window.addEventListener('DOMContentLoaded', () => {
+            const btn = document.getElementById('loginBtn');
+            if (btn) btn.setAttribute('data-text', btn.innerText.trim());
+        });
+    </script>
+</body>
+</html>
