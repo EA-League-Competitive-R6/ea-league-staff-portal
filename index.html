@@ -128,9 +128,55 @@
             border: 2px solid #10b981;
             background: rgba(16, 185, 129, 0.1);
         }
+
+        .connection-status {
+            position: fixed;
+            top: 80px;
+            right: 20px;
+            z-index: 100;
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: bold;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            transition: all 0.3s ease;
+        }
+        .connection-status.online {
+            background: rgba(16, 185, 129, 0.2);
+            border: 1px solid #10b981;
+            color: #10b981;
+        }
+        .connection-status.offline {
+            background: rgba(239, 68, 68, 0.2);
+            border: 1px solid #ef4444;
+            color: #ef4444;
+        }
+        .connection-status.checking {
+            background: rgba(59, 130, 246, 0.2);
+            border: 1px solid #3b82f6;
+            color: #3b82f6;
+        }
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            animation: pulse 2s infinite;
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
     </style>
 </head>
 <body class="antialiased min-h-screen bg-black">
+
+    <!-- Connection Status Indicator -->
+    <div id="db-status" class="connection-status checking hidden">
+        <span class="status-dot"></span>
+        <span id="db-status-text">Checking...</span>
+    </div>
 
     <!-- Toast Notification -->
     <div id="toast" class="toast"></div>
@@ -203,10 +249,25 @@
                     <button onclick="manualRefresh()" class="bg-gray-700 hover:bg-gray-600 text-white px-3 py-1 rounded text-sm font-bold" title="Refresh Data">
                         <i class="fas fa-sync-alt" id="refreshIcon"></i>
                     </button>
+                    <button onclick="testDatabaseConnection()" class="bg-blue-600 hover:bg-blue-500 text-white px-3 py-1 rounded text-sm font-bold" title="Test DB Connection">
+                        <i class="fas fa-database mr-1"></i>Test DB
+                    </button>
                     <button onclick="exportToCSV()" class="bg-blue-600 hover:bg-blue-500 text-white px-3 py-1 rounded text-sm font-bold" title="Export Data">
                         <i class="fas fa-download mr-1"></i>Export
                     </button>
                 </div>
+            </div>
+
+            <!-- Database Connection Alert -->
+            <div id="db-alert" class="hidden mb-6 bg-red-900/20 border border-red-500/30 rounded-lg p-4 flex items-center gap-3">
+                <i class="fas fa-exclamation-triangle text-red-400 text-xl"></i>
+                <div class="flex-1">
+                    <h4 class="text-red-400 font-bold">Database Connection Error</h4>
+                    <p class="text-gray-400 text-sm">Unable to connect to JSONBin.io. Please check your internet connection and API keys.</p>
+                </div>
+                <button onclick="testDatabaseConnection()" class="bg-red-600 hover:bg-red-500 text-white px-4 py-2 rounded text-sm font-bold">
+                    Retry Connection
+                </button>
             </div>
 
             <!-- Stats -->
@@ -322,28 +383,189 @@
 
     <script>
         // ==========================================
-        // SECURITY: Configuration moved to external config
-        // IMPORTANT: In production, move these to environment variables
-        // and use a backend proxy. This is still client-side but obfuscated.
+        // JSONBIN.IO CONFIGURATION
         // ==========================================
         
+        // IMPORTANT: Replace these with your actual JSONBin.io credentials
         const CONFIG = {
-            BIN_ID: atob('NjlhYTIxNzY0M2IxYzk3YmU5YjdmNDQ0'),
-            get MASTER_KEY() { 
-                // Split and reconstruct to avoid simple string matching
-                const parts = ['JDJhJDEwJEdL', 'OEpmQjlNcE', '03Nrc2JLaVllc', 'XVlbVNYRFdUZUIu', 'Uy9CMGFWTjNYdG1', 'MVU5YW11d3B3Z08='];
-                return atob(parts.join(''));
-            }
+            // Your JSONBin.io Bin ID
+            BIN_ID: '69aa217643b1c97be9b7f444',
+            // Your JSONBin.io Master Key
+            MASTER_KEY: '$2a$10$GK8JfB9MpM7nksbKiYequemSxDWTeB.S/B0aVN3XtmLU9amuwpwgO'
         };
 
+        // API URLs
         const READ_URL = `https://api.jsonbin.io/v3/b/${CONFIG.BIN_ID}/latest`;
         const UPDATE_URL = `https://api.jsonbin.io/v3/b/${CONFIG.BIN_ID}`;
 
         // ==========================================
+        // STATE MANAGEMENT
+        // ==========================================
+        
+        let currentStaff = null;
+        let autoRefreshInterval = null;
+        let currentData = { 
+            apps: [], 
+            tickets: [], 
+            announcements: [],
+            metadata: { lastUpdated: new Date().toISOString() }
+        };
+        let selectedApps = new Set();
+        let activityLog = [];
+        let isDatabaseConnected = false;
+
+        const EXPAND_STORAGE_KEY = 'ea_staff_expanded_items';
+
+        // ==========================================
+        // DATABASE CONNECTION FUNCTIONS
+        // ==========================================
+
+        function updateConnectionStatus(status, message) {
+            const statusEl = document.getElementById('db-status');
+            const textEl = document.getElementById('db-status-text');
+            const alertEl = document.getElementById('db-alert');
+            
+            statusEl.classList.remove('hidden', 'online', 'offline', 'checking');
+            
+            switch(status) {
+                case 'online':
+                    statusEl.classList.add('online');
+                    textEl.textContent = message || 'Database Connected';
+                    isDatabaseConnected = true;
+                    alertEl.classList.add('hidden');
+                    setTimeout(() => statusEl.classList.add('hidden'), 3000);
+                    break;
+                case 'offline':
+                    statusEl.classList.add('offline');
+                    textEl.textContent = message || 'Database Offline';
+                    isDatabaseConnected = false;
+                    alertEl.classList.remove('hidden');
+                    break;
+                case 'checking':
+                    statusEl.classList.add('checking');
+                    textEl.textContent = message || 'Connecting...';
+                    break;
+            }
+        }
+
+        async function testDatabaseConnection() {
+            updateConnectionStatus('checking', 'Testing connection...');
+            
+            try {
+                const response = await fetch(READ_URL, {
+                    method: 'GET',
+                    headers: { 
+                        'X-Master-Key': CONFIG.MASTER_KEY,
+                        'X-Bin-Meta': 'false'
+                    }
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                
+                const data = await response.json();
+                console.log('Database connection successful:', data);
+                updateConnectionStatus('online', 'Connected to JSONBin');
+                showToast('Database connection successful', 'success');
+                return true;
+                
+            } catch (error) {
+                console.error('Database connection failed:', error);
+                updateConnectionStatus('offline', `Connection failed: ${error.message}`);
+                showToast(`Database error: ${error.message}`, 'error');
+                return false;
+            }
+        }
+
+        // ==========================================
+        // API FUNCTIONS with Enhanced Error Handling
+        // ==========================================
+        
+        async function getData() {
+            updateConnectionStatus('checking', 'Fetching data...');
+            
+            try {
+                const response = await fetch(READ_URL, {
+                    method: 'GET',
+                    headers: { 
+                        'X-Master-Key': CONFIG.MASTER_KEY,
+                        'X-Bin-Meta': 'false'
+                    }
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                
+                const result = await response.json();
+                
+                // Ensure proper data structure
+                currentData = {
+                    apps: result.record?.apps || [],
+                    tickets: result.record?.tickets || [],
+                    announcements: result.record?.announcements || [],
+                    metadata: result.record?.metadata || { lastUpdated: new Date().toISOString() }
+                };
+                
+                updateConnectionStatus('online', 'Data synced');
+                return currentData;
+                
+            } catch (error) {
+                console.error('Error fetching data:', error);
+                updateConnectionStatus('offline', 'Sync failed');
+                showToast(`Failed to load data: ${error.message}`, 'error');
+                
+                // Return cached data if available
+                return currentData;
+            }
+        }
+        
+        async function saveData(data) {
+            updateConnectionStatus('checking', 'Saving...');
+            
+            try {
+                // Ensure data has proper structure
+                const payload = {
+                    apps: data.apps || [],
+                    tickets: data.tickets || [],
+                    announcements: data.announcements || [],
+                    metadata: {
+                        lastUpdated: new Date().toISOString(),
+                        lastModifiedBy: currentStaff?.name || 'Unknown'
+                    }
+                };
+                
+                const response = await fetch(UPDATE_URL, {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-Master-Key': CONFIG.MASTER_KEY
+                    },
+                    body: JSON.stringify(payload)
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                
+                const result = await response.json();
+                currentData = payload;
+                
+                updateConnectionStatus('online', 'Changes saved');
+                showToast('Data saved successfully', 'success');
+                return true;
+                
+            } catch (error) {
+                console.error('Error saving data:', error);
+                updateConnectionStatus('offline', 'Save failed');
+                showToast(`Failed to save: ${error.message}`, 'error');
+                return false;
+            }
+        }
+
+        // ==========================================
         // SECURITY: Hashed credentials (SHA-256)
-        // Use: https://passwordsgenerator.net/sha256-hash-generator/
-        // admin123 -> 240be518fabd2724ddb6f04eeb1da5967448d7e831c08c8fa822809f74c720a9
-        // mod123 -> 1c3d0c2c3d0c2c3d0c2c3d0c2c3d0c2c3d0c2c3d0c2c3d0c2c3d0c2c3d0c2c
         // ==========================================
         
         async function sha256(message) {
@@ -360,14 +582,14 @@
                 role: 'Owner' 
             },
             'mod': { 
-                passwordHash: 'bc8b1a69a11e9d8f5c6e9e2a4b8c7d3e1f5a9b2c4d6e8f0a1b3c5d7e9f1a2b3c',
+                passwordHash: '1a3d5e7f9b2c4d6e8f0a1b3c5d7e9f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d',
                 name: 'EA Support', 
                 role: 'Moderator' 
             }
         };
 
         // ==========================================
-        // SECURITY: XSS Protection
+        // XSS PROTECTION
         // ==========================================
         
         function escapeHtml(text) {
@@ -380,18 +602,6 @@
         function sanitizeInput(input) {
             return input.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '');
         }
-
-        // ==========================================
-        // STATE MANAGEMENT
-        // ==========================================
-        
-        let currentStaff = null;
-        let autoRefreshInterval = null;
-        let currentData = { apps: [], tickets: [], announcements: [] };
-        let selectedApps = new Set();
-        let activityLog = [];
-
-        const EXPAND_STORAGE_KEY = 'ea_staff_expanded_items';
 
         // ==========================================
         // UI UTILITIES
@@ -476,7 +686,7 @@
             const lastAttempt = parseInt(localStorage.getItem('lastAttempt') || '0');
             const now = Date.now();
             
-            if (attempts >= 5 && now - lastAttempt < 300000) { // 5 min lockout
+            if (attempts >= 5 && now - lastAttempt < 300000) {
                 setLoading('loginBtn', false);
                 errorDiv.textContent = 'Too many attempts. Please try again in 5 minutes.';
                 errorDiv.classList.remove('hidden');
@@ -495,12 +705,15 @@
                     document.getElementById('staffNameDisplay').innerText = currentStaff.name;
                     document.getElementById('staffRoleDisplay').innerText = currentStaff.role;
                     
+                    // Load data from database
                     await renderAdminData();
                     
-                    // Reduced refresh rate to avoid API limits
+                    // Set up auto-refresh
                     autoRefreshInterval = setInterval(() => {
-                        renderAdminData(false);
-                    }, 30000); // 30 seconds
+                        if (isDatabaseConnected) {
+                            renderAdminData(false);
+                        }
+                    }, 30000);
                     
                     showToast('Login successful', 'success');
                     addActivity('Login', 'Staff logged in');
@@ -540,51 +753,6 @@
         }
 
         // ==========================================
-        // API FUNCTIONS with error handling
-        // ==========================================
-        
-        async function getData() {
-            try {
-                const response = await fetch(READ_URL, {
-                    method: 'GET',
-                    headers: { 'X-Master-Key': CONFIG.MASTER_KEY }
-                });
-                
-                if (!response.ok) throw new Error(`HTTP ${response.status}`);
-                const result = await response.json();
-                currentData = result.record || { apps: [], tickets: [], announcements: [] };
-                return currentData;
-                
-            } catch (error) {
-                console.error('Error fetching data:', error);
-                showToast('Failed to connect to database', 'error');
-                return { apps: [], tickets: [], announcements: [] };
-            }
-        }
-        
-        async function saveData(data) {
-            try {
-                const response = await fetch(UPDATE_URL, {
-                    method: 'PUT',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'X-Master-Key': CONFIG.MASTER_KEY
-                    },
-                    body: JSON.stringify(data)
-                });
-                
-                if (!response.ok) throw new Error(`HTTP ${response.status}`);
-                currentData = data;
-                return true;
-                
-            } catch (error) {
-                console.error('Error saving data:', error);
-                showToast('Failed to save data', 'error');
-                return false;
-            }
-        }
-
-        // ==========================================
         // ANNOUNCEMENT FUNCTIONS
         // ==========================================
         
@@ -615,6 +783,7 @@
                 id: Date.now()
             });
             
+            // Keep only last 10 announcements
             if (data.announcements.length > 10) {
                 data.announcements = data.announcements.slice(-10);
             }
@@ -624,7 +793,7 @@
             setLoading('postAnnBtn', false);
             
             if (success) {
-                showToast('Announcement sent!', 'success');
+                showToast('Announcement sent to main site!', 'success');
                 addActivity('Announcement', `Posted: ${title}`);
                 document.getElementById('newAnnTitle').value = '';
                 document.getElementById('newAnnBody').value = '';
@@ -641,7 +810,6 @@
             icon.classList.add('fa-spin');
             await renderAdminData();
             setTimeout(() => icon.classList.remove('fa-spin'), 1000);
-            showToast('Data refreshed', 'success');
         }
 
         function loadExpandedState() {
@@ -1084,14 +1252,14 @@
             const apps = currentData.apps || [];
             const tickets = currentData.tickets || [];
             
-            let csv = 'Type,ID,Discord,Status,Date,Reviewed By\\n';
+            let csv = 'Type,ID,Discord,Status,Date,Reviewed By\n';
             
             apps.forEach(app => {
-                csv += `App,${app.id},${app.discord},${app.status},${app.date},${app.reviewedBy || 'N/A'}\\n`;
+                csv += `App,${app.id},${app.discord},${app.status},${app.date},${app.reviewedBy || 'N/A'}\n`;
             });
             
             tickets.forEach(ticket => {
-                csv += `Ticket,${ticket.id},${ticket.discord},${ticket.status},${ticket.date},${ticket.closedBy || 'N/A'}\\n`;
+                csv += `Ticket,${ticket.id},${ticket.discord},${ticket.status},${ticket.date},${ticket.closedBy || 'N/A'}\n`;
             });
             
             const blob = new Blob([csv], { type: 'text/csv' });
@@ -1110,8 +1278,9 @@
         // INITIALIZATION
         // ==========================================
         
-        window.addEventListener('DOMContentLoaded', () => {
-            // Check for existing session (optional - could add token-based auth here)
+        window.addEventListener('DOMContentLoaded', async () => {
+            // Test database connection on load
+            await testDatabaseConnection();
             renderActivityLog();
         });
 
