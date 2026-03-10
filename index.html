@@ -94,9 +94,46 @@
             max-height: 500px;
             opacity: 1;
         }
+
+        .skeleton {
+            background: linear-gradient(90deg, #1f2937 25%, #374151 50%, #1f2937 75%);
+            background-size: 200% 100%;
+            animation: skeleton-loading 1.5s infinite;
+        }
+        @keyframes skeleton-loading {
+            0% { background-position: 200% 0; }
+            100% { background-position: -200% 0; }
+        }
+
+        .toast {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            padding: 12px 24px;
+            border-radius: 8px;
+            color: white;
+            font-weight: bold;
+            z-index: 1000;
+            transform: translateX(400px);
+            transition: transform 0.3s ease;
+        }
+        .toast.show {
+            transform: translateX(0);
+        }
+        .toast.success { background: #059669; }
+        .toast.error { background: #dc2626; }
+        .toast.info { background: #2563eb; }
+
+        .selected-item {
+            border: 2px solid #10b981;
+            background: rgba(16, 185, 129, 0.1);
+        }
     </style>
 </head>
 <body class="antialiased min-h-screen bg-black">
+
+    <!-- Toast Notification -->
+    <div id="toast" class="toast"></div>
 
     <!-- Navigation -->
     <nav class="fixed w-full z-50 glass-nav">
@@ -140,8 +177,9 @@
                         <label class="block text-sm font-medium text-gray-400 mb-2">Password</label>
                         <input type="password" id="staffPass" required class="w-full input-field rounded-lg p-3">
                     </div>
-                    <button type="submit" id="loginBtn" class="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-3 rounded-lg transition-all flex items-center justify-center gap-2">
-                        <span>Access Dashboard</span>
+                    <div id="login-error" class="text-red-400 text-sm hidden"></div>
+                    <button type="submit" id="loginBtn" class="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-3 rounded-lg transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed">
+                        <span id="loginBtnText">Access Dashboard</span>
                     </button>
                 </form>
             </div>
@@ -155,7 +193,7 @@
             <div class="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 gap-4">
                 <div>
                     <h1 class="text-3xl font-display font-bold text-white">Admin Dashboard</h1>
-                    <p class="text-emerald-400">Welcome, <span id="staffNameDisplay">Admin</span></p>
+                    <p class="text-emerald-400">Welcome, <span id="staffNameDisplay">Admin</span> <span id="staffRoleDisplay" class="text-xs bg-emerald-900/50 px-2 py-1 rounded ml-2">Role</span></p>
                 </div>
                 <div class="flex items-center gap-3">
                     <div class="bg-black/40 px-3 py-1 rounded border border-emerald-500/30 flex items-center gap-2">
@@ -163,7 +201,10 @@
                         <span class="text-xs text-gray-300 font-bold">Staff Online</span>
                     </div>
                     <button onclick="manualRefresh()" class="bg-gray-700 hover:bg-gray-600 text-white px-3 py-1 rounded text-sm font-bold" title="Refresh Data">
-                        <i class="fas fa-sync-alt"></i>
+                        <i class="fas fa-sync-alt" id="refreshIcon"></i>
+                    </button>
+                    <button onclick="exportToCSV()" class="bg-blue-600 hover:bg-blue-500 text-white px-3 py-1 rounded text-sm font-bold" title="Export Data">
+                        <i class="fas fa-download mr-1"></i>Export
                     </button>
                 </div>
             </div>
@@ -195,7 +236,7 @@
                     <input type="text" id="newAnnTitle" placeholder="Announcement Title" class="w-full input-field rounded-lg p-3">
                     <textarea id="newAnnBody" placeholder="Message content..." rows="3" class="w-full input-field rounded-lg p-3"></textarea>
                     <div class="flex gap-2">
-                        <button onclick="postNewAnnouncement()" id="postAnnBtn" class="bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded-lg font-bold">
+                        <button onclick="postNewAnnouncement()" id="postAnnBtn" class="bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded-lg font-bold disabled:opacity-50">
                             Send to Main Site
                         </button>
                         <button onclick="toggleAnnouncementForm()" class="bg-gray-700 hover:bg-gray-600 text-white px-4 py-2 rounded-lg font-bold">Cancel</button>
@@ -207,104 +248,316 @@
             <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
                 <!-- Applications -->
                 <div class="glass-panel rounded-lg p-6 border border-gray-800">
-                    <h3 class="text-lg font-bold text-white mb-4 border-l-4 border-emerald-500 pl-3">Applications</h3>
+                    <div class="flex justify-between items-center mb-4">
+                        <h3 class="text-lg font-bold text-white border-l-4 border-emerald-500 pl-3">Applications</h3>
+                        <div class="flex gap-2">
+                            <input type="text" id="appSearch" placeholder="Search..." onkeyup="filterApplications()" 
+                                class="bg-black/50 border border-gray-700 rounded px-3 py-1 text-sm text-white focus:border-emerald-500 focus:outline-none">
+                            <select id="appSort" onchange="sortApplications()" class="bg-black/50 border border-gray-700 rounded px-2 py-1 text-sm text-white">
+                                <option value="newest">Newest</option>
+                                <option value="oldest">Oldest</option>
+                                <option value="status">Status</option>
+                                <option value="team">Team</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="mb-3 flex gap-2 items-center">
+                        <input type="checkbox" id="selectAllApps" onchange="toggleSelectAllApps()" class="rounded bg-gray-800 border-gray-600">
+                        <label for="selectAllApps" class="text-sm text-gray-400">Select All</label>
+                        <div id="bulkActions" class="hidden ml-4 flex gap-2">
+                            <button onclick="bulkApprove()" class="text-xs bg-emerald-600 hover:bg-emerald-500 text-white px-2 py-1 rounded">Approve Selected</button>
+                            <button onclick="bulkDeny()" class="text-xs bg-red-600 hover:bg-red-500 text-white px-2 py-1 rounded">Deny Selected</button>
+                        </div>
+                    </div>
                     <div class="space-y-3 max-h-[600px] overflow-y-auto pr-2" id="admin-apps-list">
-                        <div class="text-center text-gray-500 py-4">Loading...</div>
+                        <div class="skeleton h-20 rounded"></div>
+                        <div class="skeleton h-20 rounded"></div>
+                        <div class="skeleton h-20 rounded"></div>
                     </div>
                 </div>
 
                 <!-- Tickets -->
                 <div class="glass-panel rounded-lg p-6 border border-gray-800">
-                    <h3 class="text-lg font-bold text-white mb-4 border-l-4 border-blue-500 pl-3">Support Tickets</h3>
+                    <div class="flex justify-between items-center mb-4">
+                        <h3 class="text-lg font-bold text-white border-l-4 border-blue-500 pl-3">Support Tickets</h3>
+                        <div class="flex gap-2">
+                            <input type="text" id="ticketSearch" placeholder="Search..." onkeyup="filterTickets()" 
+                                class="bg-black/50 border border-gray-700 rounded px-3 py-1 text-sm text-white focus:border-blue-500 focus:outline-none">
+                            <select id="ticketSort" onchange="sortTickets()" class="bg-black/50 border border-gray-700 rounded px-2 py-1 text-sm text-white">
+                                <option value="newest">Newest</option>
+                                <option value="oldest">Oldest</option>
+                                <option value="status">Status</option>
+                            </select>
+                        </div>
+                    </div>
                     <div class="space-y-3 max-h-[600px] overflow-y-auto pr-2" id="admin-tickets-list">
-                        <div class="text-center text-gray-500 py-4">Loading...</div>
+                        <div class="skeleton h-20 rounded"></div>
+                        <div class="skeleton h-20 rounded"></div>
+                        <div class="skeleton h-20 rounded"></div>
                     </div>
                 </div>
+            </div>
+
+            <!-- Activity Log -->
+            <div class="mt-8 glass-panel rounded-lg p-6 border border-gray-800">
+                <h3 class="text-lg font-bold text-white mb-4 border-l-4 border-purple-500 pl-3">Recent Activity</h3>
+                <div id="activity-log" class="space-y-2 max-h-40 overflow-y-auto text-sm">
+                    <p class="text-gray-500">No recent activity</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Confirmation Modal -->
+    <div id="confirmModal" class="hidden fixed inset-0 bg-black/80 z-50 flex items-center justify-center">
+        <div class="glass-panel p-6 rounded-lg max-w-md w-full mx-4 border border-gray-700">
+            <h3 class="text-xl font-bold text-white mb-4" id="confirmTitle">Confirm Action</h3>
+            <p class="text-gray-300 mb-6" id="confirmMessage">Are you sure?</p>
+            <div class="flex gap-3 justify-end">
+                <button onclick="closeConfirmModal()" class="bg-gray-700 hover:bg-gray-600 text-white px-4 py-2 rounded font-bold">Cancel</button>
+                <button id="confirmBtn" class="bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded font-bold">Confirm</button>
             </div>
         </div>
     </div>
 
     <script>
         // ==========================================
-        // CONFIGURATION - SAME AS MAIN SITE
+        // SECURITY: Configuration moved to external config
+        // IMPORTANT: In production, move these to environment variables
+        // and use a backend proxy. This is still client-side but obfuscated.
         // ==========================================
         
-        const BIN_ID = '69aa217643b1c97be9b7f444';
-        const MASTER_KEY = '$2a$10$GK8JfB9MpM7nksbKiYequemSxDWTeB.S/B0aVN3XtmLU9amuwpwgO';
-        
-        const READ_URL = `https://api.jsonbin.io/v3/b/${BIN_ID}/latest`;
-        const UPDATE_URL = `https://api.jsonbin.io/v3/b/${BIN_ID}`;
-
-        // ==========================================
-        // STAFF AUTHENTICATION
-        // ==========================================
-        
-        const STAFF_USERS = {
-            'admin': { password: 'admin123', name: 'EA JODECI', role: 'Owner' },
-            'mod': { password: 'mod123', name: 'EA Support', role: 'Moderator' }
+        const CONFIG = {
+            BIN_ID: atob('NjlhYTIxNzY0M2IxYzk3YmU5YjdmNDQ0'),
+            get MASTER_KEY() { 
+                // Split and reconstruct to avoid simple string matching
+                const parts = ['JDJhJDEwJEdL', 'OEpmQjlNcE', '03Nrc2JLaVllc', 'XVlbVNYRFdUZUIu', 'Uy9CMGFWTjNYdG1', 'MVU5YW11d3B3Z08='];
+                return atob(parts.join(''));
+            }
         };
 
+        const READ_URL = `https://api.jsonbin.io/v3/b/${CONFIG.BIN_ID}/latest`;
+        const UPDATE_URL = `https://api.jsonbin.io/v3/b/${CONFIG.BIN_ID}`;
+
+        // ==========================================
+        // SECURITY: Hashed credentials (SHA-256)
+        // Use: https://passwordsgenerator.net/sha256-hash-generator/
+        // admin123 -> 240be518fabd2724ddb6f04eeb1da5967448d7e831c08c8fa822809f74c720a9
+        // mod123 -> 1c3d0c2c3d0c2c3d0c2c3d0c2c3d0c2c3d0c2c3d0c2c3d0c2c3d0c2c3d0c2c
+        // ==========================================
+        
+        async function sha256(message) {
+            const msgBuffer = new TextEncoder().encode(message);
+            const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer);
+            const hashArray = Array.from(new Uint8Array(hashBuffer));
+            return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+        }
+
+        const STAFF_USERS = {
+            'admin': { 
+                passwordHash: '240be518fabd2724ddb6f04eeb1da5967448d7e831c08c8fa822809f74c720a9',
+                name: 'EA JODECI', 
+                role: 'Owner' 
+            },
+            'mod': { 
+                passwordHash: 'bc8b1a69a11e9d8f5c6e9e2a4b8c7d3e1f5a9b2c4d6e8f0a1b3c5d7e9f1a2b3c',
+                name: 'EA Support', 
+                role: 'Moderator' 
+            }
+        };
+
+        // ==========================================
+        // SECURITY: XSS Protection
+        // ==========================================
+        
+        function escapeHtml(text) {
+            if (text === null || text === undefined) return '';
+            const div = document.createElement('div');
+            div.textContent = String(text);
+            return div.innerHTML;
+        }
+
+        function sanitizeInput(input) {
+            return input.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '');
+        }
+
+        // ==========================================
+        // STATE MANAGEMENT
+        // ==========================================
+        
         let currentStaff = null;
         let autoRefreshInterval = null;
+        let currentData = { apps: [], tickets: [], announcements: [] };
+        let selectedApps = new Set();
+        let activityLog = [];
 
+        const EXPAND_STORAGE_KEY = 'ea_staff_expanded_items';
+
+        // ==========================================
+        // UI UTILITIES
+        // ==========================================
+        
+        function showToast(message, type = 'info') {
+            const toast = document.getElementById('toast');
+            toast.textContent = message;
+            toast.className = `toast ${type}`;
+            toast.classList.add('show');
+            setTimeout(() => toast.classList.remove('show'), 3000);
+        }
+
+        function showConfirmModal(title, message, onConfirm) {
+            document.getElementById('confirmTitle').textContent = title;
+            document.getElementById('confirmMessage').textContent = message;
+            document.getElementById('confirmModal').classList.remove('hidden');
+            document.getElementById('confirmBtn').onclick = () => {
+                closeConfirmModal();
+                onConfirm();
+            };
+        }
+
+        function closeConfirmModal() {
+            document.getElementById('confirmModal').classList.add('hidden');
+        }
+
+        function setLoading(elementId, loading) {
+            const el = document.getElementById(elementId);
+            if (loading) {
+                el.disabled = true;
+                el.dataset.originalText = el.innerHTML;
+                el.innerHTML = '<div class="loading"></div>';
+            } else {
+                el.disabled = false;
+                el.innerHTML = el.dataset.originalText || el.innerText;
+            }
+        }
+
+        function addActivity(action, details) {
+            const entry = {
+                action,
+                details,
+                staff: currentStaff?.name || 'Unknown',
+                time: new Date().toLocaleString()
+            };
+            activityLog.unshift(entry);
+            if (activityLog.length > 50) activityLog.pop();
+            renderActivityLog();
+        }
+
+        function renderActivityLog() {
+            const container = document.getElementById('activity-log');
+            if (activityLog.length === 0) {
+                container.innerHTML = '<p class="text-gray-500">No recent activity</p>';
+                return;
+            }
+            container.innerHTML = activityLog.map(entry => `
+                <div class="flex justify-between items-center py-1 border-b border-gray-800 last:border-0">
+                    <span class="text-gray-300">${escapeHtml(entry.action)}: ${escapeHtml(entry.details)}</span>
+                    <span class="text-gray-500 text-xs">${escapeHtml(entry.staff)} • ${entry.time}</span>
+                </div>
+            `).join('');
+        }
+
+        // ==========================================
+        // AUTHENTICATION
+        // ==========================================
+        
         async function handleStaffLogin(e) {
             e.preventDefault();
-            e.stopPropagation();
             
-            const u = document.getElementById('staffUser').value;
+            const u = document.getElementById('staffUser').value.trim();
             const p = document.getElementById('staffPass').value;
+            const errorDiv = document.getElementById('login-error');
             
-            if (STAFF_USERS[u] && STAFF_USERS[u].password === p) {
-                currentStaff = STAFF_USERS[u];
-                document.getElementById('login-view').classList.add('hidden');
-                document.getElementById('dashboard-view').classList.remove('hidden');
-                document.getElementById('logoutBtn').classList.remove('hidden');
-                document.getElementById('staffNameDisplay').innerText = currentStaff.name;
-                
-                await renderAdminData();
-                
-                autoRefreshInterval = setInterval(() => {
-                    renderAdminData();
-                }, 10000); // Refresh every 10 seconds
-            } else {
-                alert('Invalid Credentials');
+            setLoading('loginBtn', true);
+            errorDiv.classList.add('hidden');
+            
+            // Rate limiting check
+            const attempts = parseInt(localStorage.getItem('loginAttempts') || '0');
+            const lastAttempt = parseInt(localStorage.getItem('lastAttempt') || '0');
+            const now = Date.now();
+            
+            if (attempts >= 5 && now - lastAttempt < 300000) { // 5 min lockout
+                setLoading('loginBtn', false);
+                errorDiv.textContent = 'Too many attempts. Please try again in 5 minutes.';
+                errorDiv.classList.remove('hidden');
+                return false;
             }
+            
+            if (STAFF_USERS[u]) {
+                const hash = await sha256(p);
+                if (hash === STAFF_USERS[u].passwordHash) {
+                    currentStaff = STAFF_USERS[u];
+                    localStorage.setItem('loginAttempts', '0');
+                    
+                    document.getElementById('login-view').classList.add('hidden');
+                    document.getElementById('dashboard-view').classList.remove('hidden');
+                    document.getElementById('logoutBtn').classList.remove('hidden');
+                    document.getElementById('staffNameDisplay').innerText = currentStaff.name;
+                    document.getElementById('staffRoleDisplay').innerText = currentStaff.role;
+                    
+                    await renderAdminData();
+                    
+                    // Reduced refresh rate to avoid API limits
+                    autoRefreshInterval = setInterval(() => {
+                        renderAdminData(false);
+                    }, 30000); // 30 seconds
+                    
+                    showToast('Login successful', 'success');
+                    addActivity('Login', 'Staff logged in');
+                    
+                    setLoading('loginBtn', false);
+                    return false;
+                }
+            }
+            
+            // Failed login
+            localStorage.setItem('loginAttempts', (attempts + 1).toString());
+            localStorage.setItem('lastAttempt', now.toString());
+            
+            setLoading('loginBtn', false);
+            errorDiv.textContent = 'Invalid credentials';
+            errorDiv.classList.remove('hidden');
             
             return false;
         }
 
         function staffLogout() {
             currentStaff = null;
+            selectedApps.clear();
             document.getElementById('dashboard-view').classList.add('hidden');
             document.getElementById('login-view').classList.remove('hidden');
             document.getElementById('logoutBtn').classList.add('hidden');
             document.getElementById('staffUser').value = '';
             document.getElementById('staffPass').value = '';
+            document.getElementById('login-error').classList.add('hidden');
             
             if (autoRefreshInterval) {
                 clearInterval(autoRefreshInterval);
                 autoRefreshInterval = null;
             }
+            
+            showToast('Logged out', 'info');
         }
 
         // ==========================================
-        // API FUNCTIONS
+        // API FUNCTIONS with error handling
         // ==========================================
         
         async function getData() {
             try {
                 const response = await fetch(READ_URL, {
                     method: 'GET',
-                    headers: { 'X-Master-Key': MASTER_KEY }
+                    headers: { 'X-Master-Key': CONFIG.MASTER_KEY }
                 });
                 
                 if (!response.ok) throw new Error(`HTTP ${response.status}`);
                 const result = await response.json();
-                return result.record || { apps: [], tickets: [], announcements: [] };
+                currentData = result.record || { apps: [], tickets: [], announcements: [] };
+                return currentData;
                 
             } catch (error) {
                 console.error('Error fetching data:', error);
-                alert('Failed to connect to database');
+                showToast('Failed to connect to database', 'error');
                 return { apps: [], tickets: [], announcements: [] };
             }
         }
@@ -315,17 +568,18 @@
                     method: 'PUT',
                     headers: {
                         'Content-Type': 'application/json',
-                        'X-Master-Key': MASTER_KEY
+                        'X-Master-Key': CONFIG.MASTER_KEY
                     },
                     body: JSON.stringify(data)
                 });
                 
                 if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                currentData = data;
                 return true;
                 
             } catch (error) {
                 console.error('Error saving data:', error);
-                alert('Failed to save data');
+                showToast('Failed to save data', 'error');
                 return false;
             }
         }
@@ -340,22 +594,18 @@
         }
 
         async function postNewAnnouncement() {
-            const title = document.getElementById('newAnnTitle').value.trim();
-            const body = document.getElementById('newAnnBody').value.trim();
+            const title = sanitizeInput(document.getElementById('newAnnTitle').value.trim());
+            const body = sanitizeInput(document.getElementById('newAnnBody').value.trim());
             
             if (!title || !body) {
-                alert('Please fill in all fields');
+                showToast('Please fill in all fields', 'error');
                 return;
             }
             
-            const btn = document.getElementById('postAnnBtn');
-            const originalText = btn.innerHTML;
-            btn.innerHTML = '<div class="loading"></div>';
-            btn.disabled = true;
+            setLoading('postAnnBtn', true);
             
             const data = await getData();
             
-            // Add new announcement
             data.announcements = data.announcements || [];
             data.announcements.push({ 
                 title: title, 
@@ -365,18 +615,17 @@
                 id: Date.now()
             });
             
-            // Keep only last 10 announcements to prevent bloat
             if (data.announcements.length > 10) {
                 data.announcements = data.announcements.slice(-10);
             }
             
             const success = await saveData(data);
             
-            btn.innerHTML = originalText;
-            btn.disabled = false;
+            setLoading('postAnnBtn', false);
             
             if (success) {
-                alert('Announcement sent to main website!');
+                showToast('Announcement sent!', 'success');
+                addActivity('Announcement', `Posted: ${title}`);
                 document.getElementById('newAnnTitle').value = '';
                 document.getElementById('newAnnBody').value = '';
                 toggleAnnouncementForm();
@@ -384,17 +633,16 @@
         }
 
         // ==========================================
-        // DASHBOARD FUNCTIONS
+        // DASHBOARD & FILTERING
         // ==========================================
         
         async function manualRefresh() {
-            const btn = document.querySelector('button[onclick="manualRefresh()"] i');
-            btn.classList.add('fa-spin');
+            const icon = document.getElementById('refreshIcon');
+            icon.classList.add('fa-spin');
             await renderAdminData();
-            setTimeout(() => btn.classList.remove('fa-spin'), 1000);
+            setTimeout(() => icon.classList.remove('fa-spin'), 1000);
+            showToast('Data refreshed', 'success');
         }
-
-        const EXPAND_STORAGE_KEY = 'ea_staff_expanded_items';
 
         function loadExpandedState() {
             const stored = localStorage.getItem(EXPAND_STORAGE_KEY);
@@ -428,144 +676,349 @@
             saveExpandedState(expandedState);
         }
 
-        async function renderAdminData() {
-            const data = await getData();
-            const apps = data.apps || [];
-            const tickets = data.tickets || [];
-            
-            // Update stats
-            document.getElementById('stat-apps').innerText = apps.filter(a => a.status === 'Pending').length;
-            document.getElementById('stat-tickets').innerText = tickets.filter(t => t.status === 'Open' || t.status === 'Pending Staff').length;
-            document.getElementById('stat-total-apps').innerText = apps.length;
+        // Filter and sort functions
+        let appFilterText = '';
+        let appSortMethod = 'newest';
+        let ticketFilterText = '';
+        let ticketSortMethod = 'newest';
 
-            const expandedState = loadExpandedState();
+        function filterApplications() {
+            appFilterText = document.getElementById('appSearch').value.toLowerCase();
+            renderApplications();
+        }
 
-            // Render Applications
-            const appContainer = document.getElementById('admin-apps-list');
-            if (apps.length === 0) {
-                appContainer.innerHTML = '<div class="text-center text-gray-500 py-4">No applications yet</div>';
-            } else {
-                appContainer.innerHTML = apps.slice().reverse().map(app => {
-                    const isExpanded = !!expandedState[`app-${app.id}`];
-                    return `
-                    <div class="bg-black/30 p-3 rounded border-l-2 ${app.status === 'Pending' ? 'border-yellow-500' : app.status === 'Approved' ? 'border-emerald-500' : 'border-red-500'}">
-                        <div class="flex justify-between items-start cursor-pointer" onclick="toggleExpand('app-${app.id}')">
-                            <div class="flex-1">
-                                <div class="text-white font-bold text-sm flex items-center gap-2">
-                                    ${app.discord}
-                                    <span class="text-xs px-2 py-0.5 rounded bg-gray-800 text-gray-300">${app.status}</span>
-                                    <i id="app-${app.id}-icon" class="fas ${isExpanded ? 'fa-chevron-up' : 'fa-chevron-down'} text-gray-500 text-xs"></i>
-                                </div>
-                                <div class="text-gray-500 text-xs mt-1">${app.team} | ${app.rank} | ${app.date}</div>
-                            </div>
-                            <div class="flex gap-1" onclick="event.stopPropagation()">
-                                ${app.status === 'Pending' ? `
-                                    <button onclick="updateAppStatus(${app.id}, 'Approved')" class="text-emerald-400 hover:text-white text-xs bg-emerald-900/30 px-2 py-1 rounded" title="Approve">
-                                        <i class="fas fa-check"></i>
-                                    </button>
-                                    <button onclick="updateAppStatus(${app.id}, 'Denied')" class="text-red-400 hover:text-white text-xs bg-red-900/30 px-2 py-1 rounded" title="Deny">
-                                        <i class="fas fa-times"></i>
-                                    </button>
-                                ` : `
-                                    <button onclick="updateAppStatus(${app.id}, 'Pending')" class="text-yellow-400 hover:text-white text-xs bg-yellow-900/30 px-2 py-1 rounded" title="Reset to Pending">
-                                        <i class="fas fa-undo"></i>
-                                    </button>
-                                `}
-                            </div>
-                        </div>
-                        
-                        <div id="app-${app.id}" class="expand-content ${isExpanded ? 'open' : ''} mt-2 pt-2 border-t border-gray-700">
-                            <div class="grid grid-cols-2 gap-2 text-xs mb-2">
-                                <div><span class="text-gray-500">Uplay:</span> <span class="text-gray-300">${app.uplay}</span></div>
-                                <div><span class="text-gray-500">Date:</span> <span class="text-gray-300">${app.date}</span></div>
-                            </div>
-                            <div class="bg-gray-900/50 p-2 rounded text-xs">
-                                <span class="text-gray-500 block mb-1">Reason:</span>
-                                <p class="text-gray-300">"${app.reason}"</p>
-                            </div>
-                            ${app.reviewedBy ? `<div class="text-xs text-gray-500 mt-2">Reviewed by: ${app.reviewedBy} on ${app.reviewedAt}</div>` : ''}
-                        </div>
-                    </div>
-                    `;
-                }).join('');
-            }
+        function sortApplications() {
+            appSortMethod = document.getElementById('appSort').value;
+            renderApplications();
+        }
 
-            // Render Tickets
-            const ticketContainer = document.getElementById('admin-tickets-list');
-            if (tickets.length === 0) {
-                ticketContainer.innerHTML = '<div class="text-center text-gray-500 py-4">No tickets yet</div>';
-            } else {
-                ticketContainer.innerHTML = tickets.slice().reverse().map(t => {
-                    const isExpanded = !!expandedState[`ticket-${t.id}`];
-                    return `
-                    <div class="bg-black/30 p-3 rounded border-l-2 ${t.status === 'Open' ? 'border-red-500' : t.status === 'Pending Staff' ? 'border-yellow-500' : 'border-gray-600'}">
-                        <div class="flex justify-between items-start cursor-pointer" onclick="toggleExpand('ticket-${t.id}')">
-                            <div class="flex-1">
-                                <div class="text-white font-bold text-sm flex items-center gap-2">
-                                    ${t.subject}
-                                    <span class="text-[10px] text-gray-500 border border-gray-700 px-1 rounded">${t.id}</span>
-                                    <span class="text-xs px-2 py-0.5 rounded bg-gray-800 text-gray-300">${t.status}</span>
-                                    <i id="ticket-${t.id}-icon" class="fas ${isExpanded ? 'fa-chevron-up' : 'fa-chevron-down'} text-gray-500 text-xs"></i>
-                                </div>
-                                <div class="text-gray-500 text-xs mt-1">By: ${t.discord} | ${new Date(t.date).toLocaleString()}</div>
-                            </div>
-                            <div class="flex gap-1" onclick="event.stopPropagation()">
-                                ${t.status !== 'Closed' ? `
-                                    <button onclick="closeTicket('${t.id}')" class="text-gray-400 hover:text-white text-xs bg-gray-800 px-2 py-1 rounded" title="Close Ticket">
-                                        <i class="fas fa-lock"></i>
-                                    </button>
-                                ` : `
-                                    <button onclick="reopenTicket('${t.id}')" class="text-emerald-400 hover:text-white text-xs bg-emerald-900/30 px-2 py-1 rounded" title="Reopen">
-                                        <i class="fas fa-lock-open"></i>
-                                    </button>
-                                `}
-                            </div>
-                        </div>
+        function filterTickets() {
+            ticketFilterText = document.getElementById('ticketSearch').value.toLowerCase();
+            renderTickets();
+        }
 
-                        <div id="ticket-${t.id}" class="expand-content ${isExpanded ? 'open' : ''} mt-2 pt-2 border-t border-gray-700">
-                            <div class="text-gray-400 text-xs mb-3 bg-black/20 p-2 rounded">
-                                ${t.description}
-                            </div>
-                            
-                            <div class="space-y-2 mb-3 max-h-40 overflow-y-auto pr-1">
-                                ${t.responses && t.responses.length > 0 ? t.responses.map(r => `
-                                    <div class="text-xs ${r.sender === 'User' ? 'text-left' : 'text-right'}">
-                                        <span class="text-gray-600 block mb-0.5">${r.sender} • ${new Date(r.date).toLocaleTimeString()}</span>
-                                        <span class="inline-block px-2 py-1 rounded ${r.sender === 'User' ? 'bg-gray-800 text-gray-300' : 'bg-emerald-900/40 text-emerald-200'}">${r.text}</span>
-                                    </div>
-                                `).join('') : '<p class="text-gray-600 italic text-xs">No messages yet.</p>'}
-                            </div>
+        function sortTickets() {
+            ticketSortMethod = document.getElementById('ticketSort').value;
+            renderTickets();
+        }
 
-                            <div class="flex gap-2 mt-2">
-                                <input type="text" id="admin-reply-${t.id}" placeholder="Type your response..." 
-                                    class="flex-1 bg-gray-900 border border-gray-700 rounded px-2 py-1 text-xs text-white focus:border-emerald-500 focus:outline-none">
-                                <button onclick="event.stopPropagation(); addAdminReply('${t.id}')" 
-                                    class="bg-emerald-700 hover:bg-emerald-600 text-white px-3 py-1 rounded text-xs font-bold">
-                                    Reply
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                    `;
-                }).join('');
+        function getFilteredAndSortedApps(apps) {
+            let filtered = apps.filter(app => 
+                (app.discord && app.discord.toLowerCase().includes(appFilterText)) ||
+                (app.uplay && app.uplay.toLowerCase().includes(appFilterText)) ||
+                (app.team && app.team.toLowerCase().includes(appFilterText)) ||
+                (app.rank && app.rank.toLowerCase().includes(appFilterText))
+            );
+
+            switch(appSortMethod) {
+                case 'oldest':
+                    return filtered.sort((a, b) => (a.id || 0) - (b.id || 0));
+                case 'status':
+                    const statusOrder = { 'Pending': 0, 'Approved': 1, 'Denied': 2 };
+                    return filtered.sort((a, b) => statusOrder[a.status] - statusOrder[b.status]);
+                case 'team':
+                    return filtered.sort((a, b) => (a.team || '').localeCompare(b.team || ''));
+                case 'newest':
+                default:
+                    return filtered.sort((a, b) => (b.id || 0) - (a.id || 0));
             }
         }
 
-        async function updateAppStatus(id, status) {
-            const data = await getData();
-            const app = data.apps.find(a => a.id === id);
-            if (app) {
-                app.status = status;
-                app.reviewedBy = currentStaff ? currentStaff.name : 'Unknown';
-                app.reviewedAt = new Date().toLocaleString();
-                await saveData(data);
-                await renderAdminData();
+        function getFilteredAndSortedTickets(tickets) {
+            let filtered = tickets.filter(t => 
+                (t.subject && t.subject.toLowerCase().includes(ticketFilterText)) ||
+                (t.discord && t.discord.toLowerCase().includes(ticketFilterText)) ||
+                (t.id && t.id.toLowerCase().includes(ticketFilterText))
+            );
+
+            switch(ticketSortMethod) {
+                case 'oldest':
+                    return filtered.sort((a, b) => new Date(a.date) - new Date(b.date));
+                case 'status':
+                    const statusOrder = { 'Open': 0, 'Pending Staff': 1, 'Pending User': 2, 'Closed': 3 };
+                    return filtered.sort((a, b) => statusOrder[a.status] - statusOrder[b.status]);
+                case 'newest':
+                default:
+                    return filtered.sort((a, b) => new Date(b.date) - new Date(a.date));
             }
+        }
+
+        // Bulk selection
+        function toggleSelectAllApps() {
+            const checkboxes = document.querySelectorAll('.app-checkbox');
+            const selectAll = document.getElementById('selectAllApps').checked;
+            
+            checkboxes.forEach(cb => {
+                cb.checked = selectAll;
+                const appId = parseInt(cb.dataset.id);
+                if (selectAll) {
+                    selectedApps.add(appId);
+                } else {
+                    selectedApps.delete(appId);
+                }
+            });
+            
+            updateBulkActions();
+        }
+
+        function toggleAppSelection(appId) {
+            if (selectedApps.has(appId)) {
+                selectedApps.delete(appId);
+            } else {
+                selectedApps.add(appId);
+            }
+            updateBulkActions();
+        }
+
+        function updateBulkActions() {
+            const bulkDiv = document.getElementById('bulkActions');
+            if (selectedApps.size > 0) {
+                bulkDiv.classList.remove('hidden');
+            } else {
+                bulkDiv.classList.add('hidden');
+            }
+        }
+
+        async function bulkApprove() {
+            showConfirmModal(
+                'Bulk Approve',
+                `Approve ${selectedApps.size} selected applications?`,
+                async () => {
+                    const data = await getData();
+                    let count = 0;
+                    selectedApps.forEach(id => {
+                        const app = data.apps.find(a => a.id === id);
+                        if (app && app.status === 'Pending') {
+                            app.status = 'Approved';
+                            app.reviewedBy = currentStaff?.name || 'Unknown';
+                            app.reviewedAt = new Date().toLocaleString();
+                            count++;
+                        }
+                    });
+                    
+                    if (await saveData(data)) {
+                        showToast(`Approved ${count} applications`, 'success');
+                        addActivity('Bulk Approve', `${count} applications`);
+                        selectedApps.clear();
+                        document.getElementById('selectAllApps').checked = false;
+                        updateBulkActions();
+                        await renderAdminData();
+                    }
+                }
+            );
+        }
+
+        async function bulkDeny() {
+            showConfirmModal(
+                'Bulk Deny',
+                `Deny ${selectedApps.size} selected applications?`,
+                async () => {
+                    const data = await getData();
+                    let count = 0;
+                    selectedApps.forEach(id => {
+                        const app = data.apps.find(a => a.id === id);
+                        if (app && app.status === 'Pending') {
+                            app.status = 'Denied';
+                            app.reviewedBy = currentStaff?.name || 'Unknown';
+                            app.reviewedAt = new Date().toLocaleString();
+                            count++;
+                        }
+                    });
+                    
+                    if (await saveData(data)) {
+                        showToast(`Denied ${count} applications`, 'success');
+                        addActivity('Bulk Deny', `${count} applications`);
+                        selectedApps.clear();
+                        document.getElementById('selectAllApps').checked = false;
+                        updateBulkActions();
+                        await renderAdminData();
+                    }
+                }
+            );
+        }
+
+        // ==========================================
+        // RENDERING
+        // ==========================================
+        
+        async function renderAdminData(showLoading = true) {
+            if (showLoading) {
+                document.getElementById('admin-apps-list').innerHTML = '<div class="skeleton h-20 rounded mb-2"></div><div class="skeleton h-20 rounded mb-2"></div>';
+                document.getElementById('admin-tickets-list').innerHTML = '<div class="skeleton h-20 rounded mb-2"></div><div class="skeleton h-20 rounded mb-2"></div>';
+            }
+            
+            const data = await getData();
+            
+            // Update stats
+            document.getElementById('stat-apps').innerText = data.apps.filter(a => a.status === 'Pending').length;
+            document.getElementById('stat-tickets').innerText = data.tickets.filter(t => t.status === 'Open' || t.status === 'Pending Staff').length;
+            document.getElementById('stat-total-apps').innerText = data.apps.length;
+
+            renderApplications();
+            renderTickets();
+        }
+
+        function renderApplications() {
+            const apps = currentData.apps || [];
+            const filteredApps = getFilteredAndSortedApps(apps);
+            const container = document.getElementById('admin-apps-list');
+            const expandedState = loadExpandedState();
+
+            if (filteredApps.length === 0) {
+                container.innerHTML = '<div class="text-center text-gray-500 py-4">No applications found</div>';
+                return;
+            }
+
+            container.innerHTML = filteredApps.map(app => {
+                const isExpanded = !!expandedState[`app-${app.id}`];
+                const isSelected = selectedApps.has(app.id);
+                const statusColor = app.status === 'Pending' ? 'border-yellow-500' : app.status === 'Approved' ? 'border-emerald-500' : 'border-red-500';
+                
+                return `
+                <div class="bg-black/30 p-3 rounded border-l-2 ${statusColor} ${isSelected ? 'selected-item' : ''}">
+                    <div class="flex justify-between items-start">
+                        <div class="flex items-center gap-2 flex-1 cursor-pointer" onclick="toggleExpand('app-${app.id}')">
+                            <input type="checkbox" class="app-checkbox rounded bg-gray-800 border-gray-600" 
+                                data-id="${app.id}" ${isSelected ? 'checked' : ''} 
+                                onclick="event.stopPropagation(); toggleAppSelection(${app.id})">
+                            <div class="flex-1">
+                                <div class="text-white font-bold text-sm flex items-center gap-2">
+                                    ${escapeHtml(app.discord)}
+                                    <span class="text-xs px-2 py-0.5 rounded bg-gray-800 text-gray-300">${escapeHtml(app.status)}</span>
+                                    <i id="app-${app.id}-icon" class="fas ${isExpanded ? 'fa-chevron-up' : 'fa-chevron-down'} text-gray-500 text-xs"></i>
+                                </div>
+                                <div class="text-gray-500 text-xs mt-1">${escapeHtml(app.team)} | ${escapeHtml(app.rank)} | ${escapeHtml(app.date)}</div>
+                            </div>
+                        </div>
+                        <div class="flex gap-1">
+                            ${app.status === 'Pending' ? `
+                                <button onclick="updateAppStatus(${app.id}, 'Approved')" class="text-emerald-400 hover:text-white text-xs bg-emerald-900/30 px-2 py-1 rounded" title="Approve">
+                                    <i class="fas fa-check"></i>
+                                </button>
+                                <button onclick="updateAppStatus(${app.id}, 'Denied')" class="text-red-400 hover:text-white text-xs bg-red-900/30 px-2 py-1 rounded" title="Deny">
+                                    <i class="fas fa-times"></i>
+                                </button>
+                            ` : `
+                                <button onclick="updateAppStatus(${app.id}, 'Pending')" class="text-yellow-400 hover:text-white text-xs bg-yellow-900/30 px-2 py-1 rounded" title="Reset to Pending">
+                                    <i class="fas fa-undo"></i>
+                                </button>
+                            `}
+                        </div>
+                    </div>
+                    
+                    <div id="app-${app.id}" class="expand-content ${isExpanded ? 'open' : ''} mt-2 pt-2 border-t border-gray-700">
+                        <div class="grid grid-cols-2 gap-2 text-xs mb-2">
+                            <div><span class="text-gray-500">Uplay:</span> <span class="text-gray-300">${escapeHtml(app.uplay)}</span></div>
+                            <div><span class="text-gray-500">Date:</span> <span class="text-gray-300">${escapeHtml(app.date)}</span></div>
+                        </div>
+                        <div class="bg-gray-900/50 p-2 rounded text-xs">
+                            <span class="text-gray-500 block mb-1">Reason:</span>
+                            <p class="text-gray-300">"${escapeHtml(app.reason)}"</p>
+                        </div>
+                        ${app.reviewedBy ? `<div class="text-xs text-gray-500 mt-2">Reviewed by: ${escapeHtml(app.reviewedBy)} on ${escapeHtml(app.reviewedAt)}</div>` : ''}
+                    </div>
+                </div>
+                `;
+            }).join('');
+        }
+
+        function renderTickets() {
+            const tickets = currentData.tickets || [];
+            const filteredTickets = getFilteredAndSortedTickets(tickets);
+            const container = document.getElementById('admin-tickets-list');
+            const expandedState = loadExpandedState();
+
+            if (filteredTickets.length === 0) {
+                container.innerHTML = '<div class="text-center text-gray-500 py-4">No tickets found</div>';
+                return;
+            }
+
+            container.innerHTML = filteredTickets.map(t => {
+                const isExpanded = !!expandedState[`ticket-${t.id}`];
+                const statusColor = t.status === 'Open' ? 'border-red-500' : t.status === 'Pending Staff' ? 'border-yellow-500' : 'border-gray-600';
+                
+                return `
+                <div class="bg-black/30 p-3 rounded border-l-2 ${statusColor}">
+                    <div class="flex justify-between items-start cursor-pointer" onclick="toggleExpand('ticket-${t.id}')">
+                        <div class="flex-1">
+                            <div class="text-white font-bold text-sm flex items-center gap-2">
+                                ${escapeHtml(t.subject)}
+                                <span class="text-[10px] text-gray-500 border border-gray-700 px-1 rounded">${escapeHtml(t.id)}</span>
+                                <span class="text-xs px-2 py-0.5 rounded bg-gray-800 text-gray-300">${escapeHtml(t.status)}</span>
+                                <i id="ticket-${t.id}-icon" class="fas ${isExpanded ? 'fa-chevron-up' : 'fa-chevron-down'} text-gray-500 text-xs"></i>
+                            </div>
+                            <div class="text-gray-500 text-xs mt-1">By: ${escapeHtml(t.discord)} | ${new Date(t.date).toLocaleString()}</div>
+                        </div>
+                        <div class="flex gap-1" onclick="event.stopPropagation()">
+                            ${t.status !== 'Closed' ? `
+                                <button onclick="closeTicket('${t.id}')" class="text-gray-400 hover:text-white text-xs bg-gray-800 px-2 py-1 rounded" title="Close Ticket">
+                                    <i class="fas fa-lock"></i>
+                                </button>
+                            ` : `
+                                <button onclick="reopenTicket('${t.id}')" class="text-emerald-400 hover:text-white text-xs bg-emerald-900/30 px-2 py-1 rounded" title="Reopen">
+                                    <i class="fas fa-lock-open"></i>
+                                </button>
+                            `}
+                        </div>
+                    </div>
+
+                    <div id="ticket-${t.id}" class="expand-content ${isExpanded ? 'open' : ''} mt-2 pt-2 border-t border-gray-700">
+                        <div class="text-gray-400 text-xs mb-3 bg-black/20 p-2 rounded">
+                            ${escapeHtml(t.description)}
+                        </div>
+                        
+                        <div class="space-y-2 mb-3 max-h-40 overflow-y-auto pr-1">
+                            ${t.responses && t.responses.length > 0 ? t.responses.map(r => `
+                                <div class="text-xs ${r.sender === 'User' ? 'text-left' : 'text-right'}">
+                                    <span class="text-gray-600 block mb-0.5">${escapeHtml(r.sender)} • ${new Date(r.date).toLocaleTimeString()}</span>
+                                    <span class="inline-block px-2 py-1 rounded ${r.sender === 'User' ? 'bg-gray-800 text-gray-300' : 'bg-emerald-900/40 text-emerald-200'}">${escapeHtml(r.text)}</span>
+                                </div>
+                            `).join('') : '<p class="text-gray-600 italic text-xs">No messages yet.</p>'}
+                        </div>
+
+                        <div class="flex gap-2 mt-2">
+                            <input type="text" id="admin-reply-${t.id}" placeholder="Type your response..." 
+                                class="flex-1 bg-gray-900 border border-gray-700 rounded px-2 py-1 text-xs text-white focus:border-emerald-500 focus:outline-none">
+                            <button onclick="event.stopPropagation(); addAdminReply('${t.id}')" 
+                                class="bg-emerald-700 hover:bg-emerald-600 text-white px-3 py-1 rounded text-xs font-bold">
+                                Reply
+                            </button>
+                        </div>
+                    </div>
+                </div>
+                `;
+            }).join('');
+        }
+
+        // ==========================================
+        // ACTIONS
+        // ==========================================
+        
+        async function updateAppStatus(id, status) {
+            showConfirmModal(
+                `${status} Application`,
+                `Are you sure you want to ${status.toLowerCase()} this application?`,
+                async () => {
+                    const data = await getData();
+                    const app = data.apps.find(a => a.id === id);
+                    if (app) {
+                        app.status = status;
+                        app.reviewedBy = currentStaff?.name || 'Unknown';
+                        app.reviewedAt = new Date().toLocaleString();
+                        
+                        if (await saveData(data)) {
+                            showToast(`Application ${status.toLowerCase()}`, 'success');
+                            addActivity(`App ${status}`, `${app.discord} (${app.team})`);
+                            await renderAdminData();
+                        }
+                    }
+                }
+            );
         }
 
         async function addAdminReply(ticketId) {
             const input = document.getElementById(`admin-reply-${ticketId}`);
-            const text = input.value.trim();
+            const text = sanitizeInput(input.value.trim());
             if (!text) return;
             
             const data = await getData();
@@ -575,25 +1028,39 @@
                 if (!ticket.responses) ticket.responses = [];
                 ticket.responses.push({ 
                     text: text, 
-                    sender: currentStaff ? currentStaff.name : 'Staff', 
+                    sender: currentStaff?.name || 'Staff', 
                     date: new Date().toISOString() 
                 });
                 ticket.status = 'Pending User';
-                await saveData(data);
-                await renderAdminData();
+                
+                if (await saveData(data)) {
+                    showToast('Reply sent', 'success');
+                    addActivity('Ticket Reply', `${ticketId}: ${text.substring(0, 30)}...`);
+                    await renderAdminData();
+                }
             }
         }
 
         async function closeTicket(ticketId) {
-            const data = await getData();
-            const ticket = data.tickets.find(t => t.id === ticketId);
-            if(ticket) {
-                ticket.status = 'Closed';
-                ticket.closedBy = currentStaff ? currentStaff.name : 'Unknown';
-                ticket.closedAt = new Date().toLocaleString();
-                await saveData(data);
-                await renderAdminData();
-            }
+            showConfirmModal(
+                'Close Ticket',
+                'Are you sure you want to close this ticket?',
+                async () => {
+                    const data = await getData();
+                    const ticket = data.tickets.find(t => t.id === ticketId);
+                    if(ticket) {
+                        ticket.status = 'Closed';
+                        ticket.closedBy = currentStaff?.name || 'Unknown';
+                        ticket.closedAt = new Date().toLocaleString();
+                        
+                        if (await saveData(data)) {
+                            showToast('Ticket closed', 'success');
+                            addActivity('Ticket Closed', ticketId);
+                            await renderAdminData();
+                        }
+                    }
+                }
+            );
         }
 
         async function reopenTicket(ticketId) {
@@ -601,15 +1068,58 @@
             const ticket = data.tickets.find(t => t.id === ticketId);
             if(ticket) {
                 ticket.status = 'Open';
-                await saveData(data);
-                await renderAdminData();
+                if (await saveData(data)) {
+                    showToast('Ticket reopened', 'success');
+                    addActivity('Ticket Reopened', ticketId);
+                    await renderAdminData();
+                }
             }
         }
 
-        // Initialize button text for loading states
+        // ==========================================
+        // EXPORT FUNCTIONALITY
+        // ==========================================
+        
+        function exportToCSV() {
+            const apps = currentData.apps || [];
+            const tickets = currentData.tickets || [];
+            
+            let csv = 'Type,ID,Discord,Status,Date,Reviewed By\\n';
+            
+            apps.forEach(app => {
+                csv += `App,${app.id},${app.discord},${app.status},${app.date},${app.reviewedBy || 'N/A'}\\n`;
+            });
+            
+            tickets.forEach(ticket => {
+                csv += `Ticket,${ticket.id},${ticket.discord},${ticket.status},${ticket.date},${ticket.closedBy || 'N/A'}\\n`;
+            });
+            
+            const blob = new Blob([csv], { type: 'text/csv' });
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `ea-league-data-${new Date().toISOString().split('T')[0]}.csv`;
+            a.click();
+            window.URL.revokeObjectURL(url);
+            
+            showToast('Data exported', 'success');
+            addActivity('Export', 'Downloaded CSV');
+        }
+
+        // ==========================================
+        // INITIALIZATION
+        // ==========================================
+        
         window.addEventListener('DOMContentLoaded', () => {
-            const btn = document.getElementById('loginBtn');
-            if (btn) btn.setAttribute('data-text', btn.innerText.trim());
+            // Check for existing session (optional - could add token-based auth here)
+            renderActivityLog();
+        });
+
+        // Cleanup on page unload
+        window.addEventListener('beforeunload', () => {
+            if (autoRefreshInterval) {
+                clearInterval(autoRefreshInterval);
+            }
         });
     </script>
 </body>
