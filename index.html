@@ -196,6 +196,18 @@
         .debug-error { background: rgba(239, 68, 68, 0.2); color: #fca5a5; }
         .debug-info { background: rgba(59, 130, 246, 0.2); color: #93c5fd; }
         .debug-success { background: rgba(16, 185, 129, 0.2); color: #6ee7b7; }
+        
+        /* Empty state styling */
+        .empty-state {
+            text-align: center;
+            padding: 2rem;
+            color: #6b7280;
+        }
+        .empty-state i {
+            font-size: 3rem;
+            margin-bottom: 1rem;
+            opacity: 0.5;
+        }
     </style>
 </head>
 <body class="antialiased min-h-screen bg-black">
@@ -505,17 +517,59 @@
 
         const EXPAND_STORAGE_KEY = 'ea_staff_expanded_items';
         const LOCAL_DATA_KEY = 'ea_staff_local_data';
+        const DATA_VERSION_KEY = 'ea_staff_data_version';
+        const CURRENT_DATA_VERSION = 2; // Increment when structure changes
 
         // ==========================================
-        // LOCALSTORAGE FALLBACK
+        // LOCALSTORAGE FALLBACK WITH MIGRATION
         // ==========================================
         
-        function saveLocalData() {
+        function checkAndMigrateData() {
+            const storedVersion = parseInt(localStorage.getItem(DATA_VERSION_KEY) || '0');
+            
+            if (storedVersion < CURRENT_DATA_VERSION) {
+                debug(`Migrating data from version ${storedVersion} to ${CURRENT_DATA_VERSION}`, 'info');
+                
+                // Migration logic here
+                const oldData = loadLocalData();
+                if (oldData && storedVersion === 0) {
+                    // Ensure all apps have IDs
+                    if (oldData.apps) {
+                        oldData.apps = oldData.apps.map((app, index) => ({
+                            ...app,
+                            id: app.id || Date.now() + index,
+                            status: app.status || 'Pending'
+                        }));
+                    }
+                    saveLocalData(oldData);
+                }
+                
+                localStorage.setItem(DATA_VERSION_KEY, CURRENT_DATA_VERSION.toString());
+            }
+        }
+
+        function saveLocalData(data = currentData) {
             try {
-                localStorage.setItem(LOCAL_DATA_KEY, JSON.stringify(currentData));
+                const payload = {
+                    data: data,
+                    version: CURRENT_DATA_VERSION,
+                    timestamp: Date.now()
+                };
+                localStorage.setItem(LOCAL_DATA_KEY, JSON.stringify(payload));
                 debug('Data saved to localStorage', 'success');
                 return true;
             } catch (e) {
+                if (e.name === 'QuotaExceededError') {
+                    debug('Storage quota exceeded, clearing old data', 'error');
+                    // Clear old data and retry
+                    localStorage.clear();
+                    try {
+                        localStorage.setItem(LOCAL_DATA_KEY, JSON.stringify({ data: data, version: CURRENT_DATA_VERSION, timestamp: Date.now() }));
+                        return true;
+                    } catch (e2) {
+                        debug('Failed to save even after clearing', 'error');
+                    }
+                }
                 debug(`localStorage error: ${e.message}`, 'error');
                 return false;
             }
@@ -525,8 +579,9 @@
             try {
                 const stored = localStorage.getItem(LOCAL_DATA_KEY);
                 if (stored) {
+                    const parsed = JSON.parse(stored);
                     debug('Loaded from localStorage', 'success');
-                    return JSON.parse(stored);
+                    return parsed.data || parsed; // Handle both new and old format
                 }
             } catch (e) {
                 debug(`localStorage error: ${e.message}`, 'error');
@@ -536,6 +591,8 @@
 
         function clearLocalData() {
             localStorage.removeItem(LOCAL_DATA_KEY);
+            localStorage.removeItem(DATA_VERSION_KEY);
+            localStorage.removeItem(EXPAND_STORAGE_KEY);
             currentData = { apps: [], tickets: [], announcements: [], metadata: {} };
             renderApplications();
             renderTickets();
@@ -544,7 +601,7 @@
         }
 
         // ==========================================
-        // DATABASE FUNCTIONS
+        // DATABASE FUNCTIONS WITH CORS HANDLING
         // ==========================================
 
         function updateConnectionStatus(status, message) {
@@ -552,6 +609,8 @@
             const textEl = document.getElementById('db-status-text');
             const alertEl = document.getElementById('db-alert');
             const errorMsgEl = document.getElementById('db-error-message');
+            
+            if (!statusEl) return;
             
             statusEl.classList.remove('hidden', 'online', 'offline', 'checking');
             
@@ -561,7 +620,7 @@
                     textEl.textContent = message || 'Connected';
                     isDatabaseConnected = true;
                     useLocalFallback = false;
-                    alertEl.classList.add('hidden');
+                    if (alertEl) alertEl.classList.add('hidden');
                     setTimeout(() => statusEl.classList.add('hidden'), 3000);
                     break;
                 case 'offline':
@@ -570,7 +629,7 @@
                     isDatabaseConnected = false;
                     useLocalFallback = true;
                     if (errorMsgEl) errorMsgEl.textContent = message || 'Connection failed. Check debug panel.';
-                    alertEl.classList.remove('hidden');
+                    if (alertEl) alertEl.classList.remove('hidden');
                     break;
                 case 'checking':
                     statusEl.classList.add('checking');
@@ -584,13 +643,20 @@
             debug(`Testing bin: ${CONFIG.BIN_ID}`, 'info');
             
             try {
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 10000); // 10s timeout
+                
                 const response = await fetch(READ_URL, {
                     method: 'GET',
                     headers: { 
                         'X-Master-Key': CONFIG.MASTER_KEY,
-                        'X-Bin-Meta': 'false'
-                    }
+                        'X-Bin-Meta': 'false',
+                        'Content-Type': 'application/json'
+                    },
+                    signal: controller.signal
                 });
+                
+                clearTimeout(timeoutId);
                 
                 debug(`Response: ${response.status} ${response.statusText}`, 'info');
                 
@@ -601,10 +667,12 @@
                 }
                 
                 const data = await response.json();
-                debug(`Success! Keys: ${Object.keys(data.record || {}).join(', ')}`, 'success');
+                debug(`Success! Keys: ${Object.keys(data).join(', ')}`, 'success');
                 
-                const apps = data.record?.apps?.length || 0;
-                const tickets = data.record?.tickets?.length || 0;
+                // Check if data has record property (JSONBin v3 structure)
+                const record = data.record || data;
+                const apps = Array.isArray(record.apps) ? record.apps.length : 0;
+                const tickets = Array.isArray(record.tickets) ? record.tickets.length : 0;
                 debug(`Data: ${apps} apps, ${tickets} tickets`, 'success');
                 
                 updateConnectionStatus('online', 'Connected');
@@ -612,8 +680,13 @@
                 return true;
                 
             } catch (error) {
-                debug(`Failed: ${error.message}`, 'error');
-                updateConnectionStatus('offline', `Error: ${error.message}`);
+                if (error.name === 'AbortError') {
+                    debug('Connection timed out', 'error');
+                    updateConnectionStatus('offline', 'Timeout');
+                } else {
+                    debug(`Failed: ${error.message}`, 'error');
+                    updateConnectionStatus('offline', `Error: ${error.message}`);
+                }
                 showToast(`Connection failed: ${error.message}`, 'error');
                 return false;
             }
@@ -634,14 +707,20 @@
             };
             
             try {
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 10000);
+                
                 const response = await fetch(UPDATE_URL, {
                     method: 'PUT',
                     headers: {
                         'Content-Type': 'application/json',
                         'X-Master-Key': CONFIG.MASTER_KEY
                     },
-                    body: JSON.stringify(emptyData)
+                    body: JSON.stringify(emptyData),
+                    signal: controller.signal
                 });
+                
+                clearTimeout(timeoutId);
                 
                 if (!response.ok) {
                     const errorText = await response.text();
@@ -651,6 +730,8 @@
                 
                 debug('Bin initialized successfully!', 'success');
                 showToast('Database initialized!', 'success');
+                currentData = emptyData;
+                saveLocalData();
                 await renderAdminData();
                 return true;
                 
@@ -662,34 +743,46 @@
         }
 
         async function getData() {
+            // Check localStorage first for quick loading
             if (useLocalFallback) {
                 const local = loadLocalData();
-                if (local) return local;
+                if (local) {
+                    currentData = local;
+                    return currentData;
+                }
             }
             
             updateConnectionStatus('checking', 'Fetching...');
-            debug('Fetching data...', 'info');
+            debug('Fetching data from JSONBin...', 'info');
             
             try {
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 10000);
+                
                 const response = await fetch(READ_URL, {
                     method: 'GET',
                     headers: { 
                         'X-Master-Key': CONFIG.MASTER_KEY,
-                        'X-Bin-Meta': 'false'
-                    }
+                        'X-Bin-Meta': 'false',
+                        'Content-Type': 'application/json'
+                    },
+                    signal: controller.signal
                 });
+                
+                clearTimeout(timeoutId);
                 
                 if (!response.ok) {
                     const errorText = await response.text();
                     debug(`Fetch error ${response.status}: ${errorText}`, 'error');
                     
-                    // Handle specific errors
                     if (response.status === 404) {
                         debug('Bin not found! Click "Init Bin" to create it.', 'error');
                         showToast('Database not found. Click "Init Bin" button.', 'error');
                     } else if (response.status === 401) {
                         debug('Authentication failed! Check your Master Key.', 'error');
                         showToast('Authentication failed. Check credentials.', 'error');
+                    } else if (response.status === 403) {
+                        debug('CORS or permission error. Check JSONBin dashboard.', 'error');
                     }
                     
                     throw new Error(`${response.status}: ${response.statusText}`);
@@ -698,35 +791,102 @@
                 const result = await response.json();
                 debug(`Raw response received`, 'info');
                 
-                // Handle JSONBin v3 structure
-                const record = result.record || {};
+                // Handle JSONBin v3 structure - data is in result.record
+                // Also handle case where meta=false returns data directly
+                const record = result.record || result;
                 
-                currentData = {
-                    apps: Array.isArray(record.apps) ? record.apps : [],
-                    tickets: Array.isArray(record.tickets) ? record.tickets : [],
-                    announcements: Array.isArray(record.announcements) ? record.announcements : [],
-                    metadata: record.metadata || { lastUpdated: new Date().toISOString() }
-                };
+                if (!record) {
+                    throw new Error('No data found in response');
+                }
+                
+                // Validate and sanitize data structure
+                currentData = validateAndSanitizeData(record);
                 
                 debug(`Parsed: ${currentData.apps.length} apps, ${currentData.tickets.length} tickets`, 'success');
+                
+                // Log first app for debugging
+                if (currentData.apps.length > 0) {
+                    debug(`First app ID: ${currentData.apps[0].id}`, 'info');
+                }
                 
                 saveLocalData();
                 updateConnectionStatus('online', 'Synced');
                 return currentData;
                 
             } catch (error) {
-                debug(`Fetch failed: ${error.message}`, 'error');
+                if (error.name === 'AbortError') {
+                    debug('Fetch timed out, using local data', 'error');
+                } else {
+                    debug(`Fetch failed: ${error.message}`, 'error');
+                }
+                
                 updateConnectionStatus('offline', 'Failed - using local');
                 
                 const local = loadLocalData();
                 if (local) {
                     currentData = local;
                     useLocalFallback = true;
+                    showToast('Using cached data (offline mode)', 'info');
                     return currentData;
                 }
                 
+                // Return empty data structure as last resort
                 return currentData;
             }
+        }
+
+        // Validate and sanitize data from API
+        function validateAndSanitizeData(record) {
+            const data = {
+                apps: [],
+                tickets: [],
+                announcements: [],
+                metadata: record.metadata || { lastUpdated: new Date().toISOString() }
+            };
+            
+            // Validate apps array
+            if (Array.isArray(record.apps)) {
+                data.apps = record.apps
+                    .filter(app => app && typeof app === 'object')
+                    .map((app, index) => ({
+                        id: app.id || Date.now() + index,
+                        discord: String(app.discord || '').trim(),
+                        uplay: String(app.uplay || '').trim(),
+                        team: String(app.team || '').trim(),
+                        rank: String(app.rank || '').trim(),
+                        reason: String(app.reason || '').trim(),
+                        status: ['Pending', 'Approved', 'Denied'].includes(app.status) ? app.status : 'Pending',
+                        date: app.date || new Date().toISOString(),
+                        reviewedBy: app.reviewedBy || null,
+                        reviewedAt: app.reviewedAt || null
+                    }));
+            }
+            
+            // Validate tickets array
+            if (Array.isArray(record.tickets)) {
+                data.tickets = record.tickets
+                    .filter(ticket => ticket && typeof ticket === 'object')
+                    .map((ticket, index) => ({
+                        id: ticket.id || `ticket-${Date.now()}-${index}`,
+                        discord: String(ticket.discord || '').trim(),
+                        subject: String(ticket.subject || '').trim(),
+                        description: String(ticket.description || '').trim(),
+                        status: ['Open', 'Pending Staff', 'Pending User', 'Closed'].includes(ticket.status) ? ticket.status : 'Open',
+                        date: ticket.date || new Date().toISOString(),
+                        responses: Array.isArray(ticket.responses) ? ticket.responses : [],
+                        closedBy: ticket.closedBy || null,
+                        closedAt: ticket.closedAt || null
+                    }));
+            }
+            
+            // Validate announcements
+            if (Array.isArray(record.announcements)) {
+                data.announcements = record.announcements
+                    .filter(ann => ann && typeof ann === 'object')
+                    .slice(-10); // Keep only last 10
+            }
+            
+            return data;
         }
         
         async function saveData(data) {
@@ -741,6 +901,9 @@
             debug('Saving data...', 'info');
             
             try {
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 10000);
+                
                 const payload = {
                     apps: data.apps || [],
                     tickets: data.tickets || [],
@@ -757,8 +920,11 @@
                         'Content-Type': 'application/json',
                         'X-Master-Key': CONFIG.MASTER_KEY
                     },
-                    body: JSON.stringify(payload)
+                    body: JSON.stringify(payload),
+                    signal: controller.signal
                 });
+                
+                clearTimeout(timeoutId);
                 
                 if (!response.ok) {
                     const errorText = await response.text();
@@ -774,7 +940,12 @@
                 return true;
                 
             } catch (error) {
-                debug(`Save failed: ${error.message}`, 'error');
+                if (error.name === 'AbortError') {
+                    debug('Save timed out', 'error');
+                } else {
+                    debug(`Save failed: ${error.message}`, 'error');
+                }
+                
                 updateConnectionStatus('offline', 'Failed - local only');
                 currentData = data;
                 saveLocalData();
@@ -816,6 +987,7 @@
         }
 
         function sanitizeInput(input) {
+            if (!input) return '';
             return input.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '');
         }
 
@@ -825,6 +997,7 @@
         
         function showToast(message, type = 'info') {
             const toast = document.getElementById('toast');
+            if (!toast) return;
             toast.textContent = message;
             toast.className = `toast ${type}`;
             toast.classList.add('show');
@@ -847,6 +1020,7 @@
 
         function setLoading(elementId, loading) {
             const el = document.getElementById(elementId);
+            if (!el) return;
             if (loading) {
                 el.disabled = true;
                 el.dataset.originalText = el.innerHTML;
@@ -871,6 +1045,7 @@
 
         function renderActivityLog() {
             const container = document.getElementById('activity-log');
+            if (!container) return;
             if (activityLog.length === 0) {
                 container.innerHTML = '<p class="text-gray-500">No recent activity</p>';
                 return;
@@ -1079,12 +1254,19 @@
         }
 
         function getFilteredAndSortedApps(apps) {
-            let filtered = apps.filter(app => 
-                (app.discord && app.discord.toLowerCase().includes(appFilterText)) ||
-                (app.uplay && app.uplay.toLowerCase().includes(appFilterText)) ||
-                (app.team && app.team.toLowerCase().includes(appFilterText)) ||
-                (app.rank && app.rank.toLowerCase().includes(appFilterText))
-            );
+            if (!Array.isArray(apps)) return [];
+            
+            let filtered = apps.filter(app => {
+                if (!app || typeof app !== 'object') return false;
+                const discord = (app.discord || '').toLowerCase();
+                const uplay = (app.uplay || '').toLowerCase();
+                const team = (app.team || '').toLowerCase();
+                const rank = (app.rank || '').toLowerCase();
+                return discord.includes(appFilterText) ||
+                       uplay.includes(appFilterText) ||
+                       team.includes(appFilterText) ||
+                       rank.includes(appFilterText);
+            });
 
             switch(appSortMethod) {
                 case 'oldest':
@@ -1101,11 +1283,17 @@
         }
 
         function getFilteredAndSortedTickets(tickets) {
-            let filtered = tickets.filter(t => 
-                (t.subject && t.subject.toLowerCase().includes(ticketFilterText)) ||
-                (t.discord && t.discord.toLowerCase().includes(ticketFilterText)) ||
-                (t.id && t.id.toLowerCase().includes(ticketFilterText))
-            );
+            if (!Array.isArray(tickets)) return [];
+            
+            let filtered = tickets.filter(t => {
+                if (!t || typeof t !== 'object') return false;
+                const subject = (t.subject || '').toLowerCase();
+                const discord = (t.discord || '').toLowerCase();
+                const id = (t.id || '').toLowerCase();
+                return subject.includes(ticketFilterText) ||
+                       discord.includes(ticketFilterText) ||
+                       id.includes(ticketFilterText);
+            });
 
             switch(ticketSortMethod) {
                 case 'oldest':
@@ -1230,14 +1418,19 @@
 
         function renderApplications() {
             const apps = currentData.apps || [];
-            debug(`Rendering ${apps.length} apps`, 'info');
+            debug(`Rendering ${apps.length} applications`, 'info');
             
             const filteredApps = getFilteredAndSortedApps(apps);
             const container = document.getElementById('admin-apps-list');
             const expandedState = loadExpandedState();
 
             if (filteredApps.length === 0) {
-                container.innerHTML = '<div class="text-center text-gray-500 py-4">No applications found. Applications will appear here when submitted.</div>';
+                container.innerHTML = `
+                    <div class="empty-state">
+                        <i class="fas fa-inbox"></i>
+                        <p>No applications found</p>
+                        <p class="text-xs mt-1">Applications will appear here when submitted</p>
+                    </div>`;
                 return;
             }
 
@@ -1247,31 +1440,33 @@
                 const statusColor = app.status === 'Pending' ? 'border-yellow-500' : app.status === 'Approved' ? 'border-emerald-500' : 'border-red-500';
                 
                 return `
-                <div class="bg-black/30 p-3 rounded border-l-2 ${statusColor} ${isSelected ? 'selected-item' : ''}">
+                <div class="bg-black/30 p-3 rounded border-l-2 ${statusColor} ${isSelected ? 'selected-item' : ''} mb-2 hover:bg-black/50 transition-colors">
                     <div class="flex justify-between items-start">
                         <div class="flex items-center gap-2 flex-1 cursor-pointer" onclick="toggleExpand('app-${app.id}')">
-                            <input type="checkbox" class="app-checkbox rounded bg-gray-800 border-gray-600" 
+                            <input type="checkbox" class="app-checkbox rounded bg-gray-800 border-gray-600 cursor-pointer" 
                                 data-id="${app.id}" ${isSelected ? 'checked' : ''} 
                                 onclick="event.stopPropagation(); toggleAppSelection(${app.id})">
-                            <div class="flex-1">
-                                <div class="text-white font-bold text-sm flex items-center gap-2">
-                                    ${escapeHtml(app.discord)}
-                                    <span class="text-xs px-2 py-0.5 rounded bg-gray-800 text-gray-300">${escapeHtml(app.status)}</span>
+                            <div class="flex-1 min-w-0">
+                                <div class="text-white font-bold text-sm flex items-center gap-2 flex-wrap">
+                                    <span class="truncate">${escapeHtml(app.discord || 'Unknown')}</span>
+                                    <span class="text-xs px-2 py-0.5 rounded bg-gray-800 text-gray-300 whitespace-nowrap">${escapeHtml(app.status)}</span>
                                     <i id="app-${app.id}-icon" class="fas ${isExpanded ? 'fa-chevron-up' : 'fa-chevron-down'} text-gray-500 text-xs"></i>
                                 </div>
-                                <div class="text-gray-500 text-xs mt-1">${escapeHtml(app.team)} | ${escapeHtml(app.rank)} | ${escapeHtml(app.date)}</div>
+                                <div class="text-gray-500 text-xs mt-1 truncate">
+                                    ${escapeHtml(app.team || 'No Team')} | ${escapeHtml(app.rank || 'No Rank')} | ${escapeHtml(app.date || 'No Date')}
+                                </div>
                             </div>
                         </div>
-                        <div class="flex gap-1">
+                        <div class="flex gap-1 ml-2">
                             ${app.status === 'Pending' ? `
-                                <button onclick="updateAppStatus(${app.id}, 'Approved')" class="text-emerald-400 hover:text-white text-xs bg-emerald-900/30 px-2 py-1 rounded" title="Approve">
+                                <button onclick="event.stopPropagation(); updateAppStatus(${app.id}, 'Approved')" class="text-emerald-400 hover:text-white text-xs bg-emerald-900/30 px-2 py-1 rounded transition-colors" title="Approve">
                                     <i class="fas fa-check"></i>
                                 </button>
-                                <button onclick="updateAppStatus(${app.id}, 'Denied')" class="text-red-400 hover:text-white text-xs bg-red-900/30 px-2 py-1 rounded" title="Deny">
+                                <button onclick="event.stopPropagation(); updateAppStatus(${app.id}, 'Denied')" class="text-red-400 hover:text-white text-xs bg-red-900/30 px-2 py-1 rounded transition-colors" title="Deny">
                                     <i class="fas fa-times"></i>
                                 </button>
                             ` : `
-                                <button onclick="updateAppStatus(${app.id}, 'Pending')" class="text-yellow-400 hover:text-white text-xs bg-yellow-900/30 px-2 py-1 rounded" title="Reset">
+                                <button onclick="event.stopPropagation(); updateAppStatus(${app.id}, 'Pending')" class="text-yellow-400 hover:text-white text-xs bg-yellow-900/30 px-2 py-1 rounded transition-colors" title="Reset">
                                     <i class="fas fa-undo"></i>
                                 </button>
                             `}
@@ -1279,13 +1474,14 @@
                     </div>
                     
                     <div id="app-${app.id}" class="expand-content ${isExpanded ? 'open' : ''} mt-2 pt-2 border-t border-gray-700">
-                        <div class="grid grid-cols-2 gap-2 text-xs mb-2">
-                            <div><span class="text-gray-500">Uplay:</span> <span class="text-gray-300">${escapeHtml(app.uplay)}</span></div>
-                            <div><span class="text-gray-500">Date:</span> <span class="text-gray-300">${escapeHtml(app.date)}</span></div>
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs mb-2">
+                            <div><span class="text-gray-500">Uplay:</span> <span class="text-gray-300">${escapeHtml(app.uplay || 'N/A')}</span></div>
+                            <div><span class="text-gray-500">Date:</span> <span class="text-gray-300">${escapeHtml(app.date || 'N/A')}</span></div>
+                            <div><span class="text-gray-500">ID:</span> <span class="text-gray-300">${app.id}</span></div>
                         </div>
                         <div class="bg-gray-900/50 p-2 rounded text-xs">
                             <span class="text-gray-500 block mb-1">Reason:</span>
-                            <p class="text-gray-300">"${escapeHtml(app.reason)}"</p>
+                            <p class="text-gray-300 whitespace-pre-wrap">"${escapeHtml(app.reason || 'No reason provided')}"</p>
                         </div>
                         ${app.reviewedBy ? `<div class="text-xs text-gray-500 mt-2">Reviewed by: ${escapeHtml(app.reviewedBy)} on ${escapeHtml(app.reviewedAt)}</div>` : ''}
                     </div>
@@ -1303,7 +1499,12 @@
             const expandedState = loadExpandedState();
 
             if (filteredTickets.length === 0) {
-                container.innerHTML = '<div class="text-center text-gray-500 py-4">No tickets found. Tickets will appear here when submitted.</div>';
+                container.innerHTML = `
+                    <div class="empty-state">
+                        <i class="fas fa-ticket-alt"></i>
+                        <p>No tickets found</p>
+                        <p class="text-xs mt-1">Tickets will appear here when submitted</p>
+                    </div>`;
                 return;
             }
 
@@ -1312,24 +1513,24 @@
                 const statusColor = t.status === 'Open' ? 'border-red-500' : t.status === 'Pending Staff' ? 'border-yellow-500' : 'border-gray-600';
                 
                 return `
-                <div class="bg-black/30 p-3 rounded border-l-2 ${statusColor}">
+                <div class="bg-black/30 p-3 rounded border-l-2 ${statusColor} mb-2 hover:bg-black/50 transition-colors">
                     <div class="flex justify-between items-start cursor-pointer" onclick="toggleExpand('ticket-${t.id}')">
-                        <div class="flex-1">
-                            <div class="text-white font-bold text-sm flex items-center gap-2">
-                                ${escapeHtml(t.subject)}
-                                <span class="text-[10px] text-gray-500 border border-gray-700 px-1 rounded">${escapeHtml(t.id)}</span>
-                                <span class="text-xs px-2 py-0.5 rounded bg-gray-800 text-gray-300">${escapeHtml(t.status)}</span>
+                        <div class="flex-1 min-w-0">
+                            <div class="text-white font-bold text-sm flex items-center gap-2 flex-wrap">
+                                <span class="truncate">${escapeHtml(t.subject || 'No Subject')}</span>
+                                <span class="text-[10px] text-gray-500 border border-gray-700 px-1 rounded whitespace-nowrap">${escapeHtml(t.id || 'N/A')}</span>
+                                <span class="text-xs px-2 py-0.5 rounded bg-gray-800 text-gray-300 whitespace-nowrap">${escapeHtml(t.status)}</span>
                                 <i id="ticket-${t.id}-icon" class="fas ${isExpanded ? 'fa-chevron-up' : 'fa-chevron-down'} text-gray-500 text-xs"></i>
                             </div>
-                            <div class="text-gray-500 text-xs mt-1">By: ${escapeHtml(t.discord)} | ${new Date(t.date).toLocaleString()}</div>
+                            <div class="text-gray-500 text-xs mt-1 truncate">By: ${escapeHtml(t.discord || 'Unknown')} | ${t.date ? new Date(t.date).toLocaleString() : 'Unknown Date'}</div>
                         </div>
-                        <div class="flex gap-1" onclick="event.stopPropagation()">
+                        <div class="flex gap-1 ml-2" onclick="event.stopPropagation()">
                             ${t.status !== 'Closed' ? `
-                                <button onclick="closeTicket('${t.id}')" class="text-gray-400 hover:text-white text-xs bg-gray-800 px-2 py-1 rounded" title="Close">
+                                <button onclick="closeTicket('${t.id}')" class="text-gray-400 hover:text-white text-xs bg-gray-800 px-2 py-1 rounded transition-colors" title="Close">
                                     <i class="fas fa-lock"></i>
                                 </button>
                             ` : `
-                                <button onclick="reopenTicket('${t.id}')" class="text-emerald-400 hover:text-white text-xs bg-emerald-900/30 px-2 py-1 rounded" title="Reopen">
+                                <button onclick="reopenTicket('${t.id}')" class="text-emerald-400 hover:text-white text-xs bg-emerald-900/30 px-2 py-1 rounded transition-colors" title="Reopen">
                                     <i class="fas fa-lock-open"></i>
                                 </button>
                             `}
@@ -1337,15 +1538,15 @@
                     </div>
 
                     <div id="ticket-${t.id}" class="expand-content ${isExpanded ? 'open' : ''} mt-2 pt-2 border-t border-gray-700">
-                        <div class="text-gray-400 text-xs mb-3 bg-black/20 p-2 rounded">
-                            ${escapeHtml(t.description)}
+                        <div class="text-gray-400 text-xs mb-3 bg-black/20 p-2 rounded whitespace-pre-wrap">
+                            ${escapeHtml(t.description || 'No description')}
                         </div>
                         
                         <div class="space-y-2 mb-3 max-h-40 overflow-y-auto pr-1">
                             ${t.responses && t.responses.length > 0 ? t.responses.map(r => `
                                 <div class="text-xs ${r.sender === 'User' ? 'text-left' : 'text-right'}">
-                                    <span class="text-gray-600 block mb-0.5">${escapeHtml(r.sender)} • ${new Date(r.date).toLocaleTimeString()}</span>
-                                    <span class="inline-block px-2 py-1 rounded ${r.sender === 'User' ? 'bg-gray-800 text-gray-300' : 'bg-emerald-900/40 text-emerald-200'}">${escapeHtml(r.text)}</span>
+                                    <span class="text-gray-600 block mb-0.5">${escapeHtml(r.sender || 'Unknown')} • ${r.date ? new Date(r.date).toLocaleTimeString() : 'Unknown'}</span>
+                                    <span class="inline-block px-2 py-1 rounded ${r.sender === 'User' ? 'bg-gray-800 text-gray-300' : 'bg-emerald-900/40 text-emerald-200'}">${escapeHtml(r.text || '')}</span>
                                 </div>
                             `).join('') : '<p class="text-gray-600 italic text-xs">No messages yet.</p>'}
                         </div>
@@ -1354,7 +1555,7 @@
                             <input type="text" id="admin-reply-${t.id}" placeholder="Type response..." 
                                 class="flex-1 bg-gray-900 border border-gray-700 rounded px-2 py-1 text-xs text-white focus:border-emerald-500 focus:outline-none">
                             <button onclick="event.stopPropagation(); addAdminReply('${t.id}')" 
-                                class="bg-emerald-700 hover:bg-emerald-600 text-white px-3 py-1 rounded text-xs font-bold">
+                                class="bg-emerald-700 hover:bg-emerald-600 text-white px-3 py-1 rounded text-xs font-bold transition-colors">
                                 Reply
                             </button>
                         </div>
@@ -1371,7 +1572,7 @@
         async function updateAppStatus(id, status) {
             showConfirmModal(
                 `${status} Application`,
-                `Are you sure?`,
+                `Are you sure you want to ${status.toLowerCase()} this application?`,
                 async () => {
                     const data = await getData();
                     const app = data.apps.find(a => a.id === id);
@@ -1408,6 +1609,7 @@
                 ticket.status = 'Pending User';
                 
                 if (await saveData(data)) {
+                    input.value = '';
                     showToast('Reply sent', 'success');
                     addActivity('Ticket Reply', `${ticketId}: ${text.substring(0, 30)}...`);
                     await renderAdminData();
@@ -1418,7 +1620,7 @@
         async function closeTicket(ticketId) {
             showConfirmModal(
                 'Close Ticket',
-                'Are you sure?',
+                'Are you sure you want to close this ticket?',
                 async () => {
                     const data = await getData();
                     const ticket = data.tickets.find(t => t.id === ticketId);
@@ -1461,23 +1663,33 @@
             let csv = 'Type,ID,Discord,Status,Date,Reviewed By\n';
             
             apps.forEach(app => {
-                csv += `App,${app.id},${app.discord},${app.status},${app.date},${app.reviewedBy || 'N/A'}\n`;
+                csv += `App,${app.id || 'N/A'},${escapeCsv(app.discord)},${app.status || 'N/A'},${app.date || 'N/A'},${escapeCsv(app.reviewedBy)}\n`;
             });
             
             tickets.forEach(ticket => {
-                csv += `Ticket,${ticket.id},${ticket.discord},${ticket.status},${ticket.date},${ticket.closedBy || 'N/A'}\n`;
+                csv += `Ticket,${ticket.id || 'N/A'},${escapeCsv(ticket.discord)},${ticket.status || 'N/A'},${ticket.date || 'N/A'},${escapeCsv(ticket.closedBy)}\n`;
             });
             
-            const blob = new Blob([csv], { type: 'text/csv' });
+            const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
             const url = window.URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = url;
             a.download = `ea-league-data-${new Date().toISOString().split('T')[0]}.csv`;
+            document.body.appendChild(a);
             a.click();
+            document.body.removeChild(a);
             window.URL.revokeObjectURL(url);
             
             showToast('Data exported', 'success');
             addActivity('Export', 'Downloaded CSV');
+        }
+
+        function escapeCsv(text) {
+            if (!text) return 'N/A';
+            // Escape quotes and wrap in quotes if contains comma
+            const escaped = String(text).replace(/"/g, '""');
+            if (escaped.includes(',')) return `"${escaped}"`;
+            return escaped;
         }
 
         // ==========================================
@@ -1488,7 +1700,10 @@
             debug('Staff Portal initializing...', 'info');
             debug(`Bin ID: ${CONFIG.BIN_ID}`, 'info');
             
-            // Don't log full key for security, just first/last few chars
+            // Check for data migration
+            checkAndMigrateData();
+            
+            // Don't log full key for security
             const keyPreview = CONFIG.MASTER_KEY.substring(0, 10) + '...' + CONFIG.MASTER_KEY.substring(CONFIG.MASTER_KEY.length - 5);
             debug(`Master Key: ${keyPreview}`, 'info');
             
