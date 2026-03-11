@@ -168,6 +168,34 @@
             0%, 100% { opacity: 1; }
             50% { opacity: 0.5; }
         }
+
+        .debug-panel {
+            position: fixed;
+            bottom: 20px;
+            left: 20px;
+            background: rgba(0, 0, 0, 0.9);
+            border: 1px solid #333;
+            border-radius: 8px;
+            padding: 12px;
+            max-width: 400px;
+            max-height: 300px;
+            overflow-y: auto;
+            font-family: monospace;
+            font-size: 11px;
+            z-index: 999;
+            display: none;
+        }
+        .debug-panel.show {
+            display: block;
+        }
+        .debug-entry {
+            margin-bottom: 4px;
+            padding: 2px 4px;
+            border-radius: 2px;
+        }
+        .debug-error { background: rgba(239, 68, 68, 0.2); color: #fca5a5; }
+        .debug-info { background: rgba(59, 130, 246, 0.2); color: #93c5fd; }
+        .debug-success { background: rgba(16, 185, 129, 0.2); color: #6ee7b7; }
     </style>
 </head>
 <body class="antialiased min-h-screen bg-black">
@@ -177,6 +205,18 @@
         <span class="status-dot"></span>
         <span id="db-status-text">Checking...</span>
     </div>
+
+    <!-- Debug Panel -->
+    <div id="debug-panel" class="debug-panel">
+        <div class="flex justify-between items-center mb-2 border-b border-gray-700 pb-1">
+            <span class="text-gray-400 font-bold">Debug Log</span>
+            <button onclick="toggleDebug()" class="text-gray-500 hover:text-white text-xs">Close</button>
+        </div>
+        <div id="debug-content"></div>
+    </div>
+    <button onclick="toggleDebug()" class="fixed bottom-4 left-4 bg-gray-800 hover:bg-gray-700 text-gray-400 px-3 py-1 rounded text-xs z-50">
+        <i class="fas fa-bug mr-1"></i>Debug
+    </button>
 
     <!-- Toast Notification -->
     <div id="toast" class="toast"></div>
@@ -228,6 +268,14 @@
                         <span id="loginBtnText">Access Dashboard</span>
                     </button>
                 </form>
+
+                <!-- Database Config Notice -->
+                <div class="mt-6 p-3 bg-blue-900/20 border border-blue-500/30 rounded-lg">
+                    <p class="text-blue-400 text-xs text-center">
+                        <i class="fas fa-info-circle mr-1"></i>
+                        Database configured. Click "Debug" button if you encounter issues.
+                    </p>
+                </div>
             </div>
         </div>
     </div>
@@ -241,7 +289,7 @@
                     <h1 class="text-3xl font-display font-bold text-white">Admin Dashboard</h1>
                     <p class="text-emerald-400">Welcome, <span id="staffNameDisplay">Admin</span> <span id="staffRoleDisplay" class="text-xs bg-emerald-900/50 px-2 py-1 rounded ml-2">Role</span></p>
                 </div>
-                <div class="flex items-center gap-3">
+                <div class="flex items-center gap-3 flex-wrap">
                     <div class="bg-black/40 px-3 py-1 rounded border border-emerald-500/30 flex items-center gap-2">
                         <span class="w-2 h-2 bg-emerald-500 rounded-full animate-pulse"></span>
                         <span class="text-xs text-gray-300 font-bold">Staff Online</span>
@@ -252,8 +300,14 @@
                     <button onclick="testDatabaseConnection()" class="bg-blue-600 hover:bg-blue-500 text-white px-3 py-1 rounded text-sm font-bold" title="Test DB Connection">
                         <i class="fas fa-database mr-1"></i>Test DB
                     </button>
+                    <button onclick="initializeEmptyBin()" class="bg-yellow-600 hover:bg-yellow-500 text-white px-3 py-1 rounded text-sm font-bold" title="Initialize Empty Bin">
+                        <i class="fas fa-rocket mr-1"></i>Init Bin
+                    </button>
                     <button onclick="exportToCSV()" class="bg-blue-600 hover:bg-blue-500 text-white px-3 py-1 rounded text-sm font-bold" title="Export Data">
                         <i class="fas fa-download mr-1"></i>Export
+                    </button>
+                    <button onclick="clearLocalData()" class="bg-red-600 hover:bg-red-500 text-white px-3 py-1 rounded text-sm font-bold" title="Clear Local Data">
+                        <i class="fas fa-trash mr-1"></i>Clear Local
                     </button>
                 </div>
             </div>
@@ -263,11 +317,16 @@
                 <i class="fas fa-exclamation-triangle text-red-400 text-xl"></i>
                 <div class="flex-1">
                     <h4 class="text-red-400 font-bold">Database Connection Error</h4>
-                    <p class="text-gray-400 text-sm">Unable to connect to JSONBin.io. Please check your internet connection and API keys.</p>
+                    <p class="text-gray-400 text-sm" id="db-error-message">Unable to connect to JSONBin.io. Check debug panel for details.</p>
                 </div>
-                <button onclick="testDatabaseConnection()" class="bg-red-600 hover:bg-red-500 text-white px-4 py-2 rounded text-sm font-bold">
-                    Retry Connection
-                </button>
+                <div class="flex gap-2">
+                    <button onclick="testDatabaseConnection()" class="bg-red-600 hover:bg-red-500 text-white px-4 py-2 rounded text-sm font-bold">
+                        Retry
+                    </button>
+                    <button onclick="initializeEmptyBin()" class="bg-yellow-600 hover:bg-yellow-500 text-white px-4 py-2 rounded text-sm font-bold">
+                        Init Bin
+                    </button>
+                </div>
             </div>
 
             <!-- Stats -->
@@ -383,18 +442,47 @@
 
     <script>
         // ==========================================
-        // JSONBIN.IO CONFIGURATION
+        // YOUR CONFIGURATION - ALREADY SET
         // ==========================================
         
-        // IMPORTANT: Replace these with your actual JSONBin.io credentials
         const CONFIG = {
-            // Your JSONBin.io Bin ID
             BIN_ID: '69aa217643b1c97be9b7f444',
-            // Your JSONBin.io Master Key
             MASTER_KEY: '$2a$10$GK8JfB9MpM7nksbKiYequemSxDWTeB.S/B0aVN3XtmLU9amuwpwgO'
         };
 
+        // ==========================================
+        // DEBUGGING SYSTEM
+        // ==========================================
+        
+        let debugLog = [];
+        
+        function debug(message, type = 'info') {
+            const entry = { time: new Date().toLocaleTimeString(), message, type };
+            debugLog.push(entry);
+            console.log(`[${type.toUpperCase()}] ${message}`);
+            
+            const debugContent = document.getElementById('debug-content');
+            if (debugContent) {
+                const div = document.createElement('div');
+                div.className = `debug-entry debug-${type}`;
+                div.textContent = `[${entry.time}] ${message}`;
+                debugContent.insertBefore(div, debugContent.firstChild);
+                
+                while (debugContent.children.length > 50) {
+                    debugContent.removeChild(debugContent.lastChild);
+                }
+            }
+        }
+
+        function toggleDebug() {
+            const panel = document.getElementById('debug-panel');
+            panel.classList.toggle('show');
+        }
+
+        // ==========================================
         // API URLs
+        // ==========================================
+        
         const READ_URL = `https://api.jsonbin.io/v3/b/${CONFIG.BIN_ID}/latest`;
         const UPDATE_URL = `https://api.jsonbin.io/v3/b/${CONFIG.BIN_ID}`;
 
@@ -413,32 +501,75 @@
         let selectedApps = new Set();
         let activityLog = [];
         let isDatabaseConnected = false;
+        let useLocalFallback = false;
 
         const EXPAND_STORAGE_KEY = 'ea_staff_expanded_items';
+        const LOCAL_DATA_KEY = 'ea_staff_local_data';
 
         // ==========================================
-        // DATABASE CONNECTION FUNCTIONS
+        // LOCALSTORAGE FALLBACK
+        // ==========================================
+        
+        function saveLocalData() {
+            try {
+                localStorage.setItem(LOCAL_DATA_KEY, JSON.stringify(currentData));
+                debug('Data saved to localStorage', 'success');
+                return true;
+            } catch (e) {
+                debug(`localStorage error: ${e.message}`, 'error');
+                return false;
+            }
+        }
+
+        function loadLocalData() {
+            try {
+                const stored = localStorage.getItem(LOCAL_DATA_KEY);
+                if (stored) {
+                    debug('Loaded from localStorage', 'success');
+                    return JSON.parse(stored);
+                }
+            } catch (e) {
+                debug(`localStorage error: ${e.message}`, 'error');
+            }
+            return null;
+        }
+
+        function clearLocalData() {
+            localStorage.removeItem(LOCAL_DATA_KEY);
+            currentData = { apps: [], tickets: [], announcements: [], metadata: {} };
+            renderApplications();
+            renderTickets();
+            showToast('Local data cleared', 'info');
+            debug('Local data cleared', 'info');
+        }
+
+        // ==========================================
+        // DATABASE FUNCTIONS
         // ==========================================
 
         function updateConnectionStatus(status, message) {
             const statusEl = document.getElementById('db-status');
             const textEl = document.getElementById('db-status-text');
             const alertEl = document.getElementById('db-alert');
+            const errorMsgEl = document.getElementById('db-error-message');
             
             statusEl.classList.remove('hidden', 'online', 'offline', 'checking');
             
             switch(status) {
                 case 'online':
                     statusEl.classList.add('online');
-                    textEl.textContent = message || 'Database Connected';
+                    textEl.textContent = message || 'Connected';
                     isDatabaseConnected = true;
+                    useLocalFallback = false;
                     alertEl.classList.add('hidden');
                     setTimeout(() => statusEl.classList.add('hidden'), 3000);
                     break;
                 case 'offline':
                     statusEl.classList.add('offline');
-                    textEl.textContent = message || 'Database Offline';
+                    textEl.textContent = message || 'Offline';
                     isDatabaseConnected = false;
+                    useLocalFallback = true;
+                    if (errorMsgEl) errorMsgEl.textContent = message || 'Connection failed. Check debug panel.';
                     alertEl.classList.remove('hidden');
                     break;
                 case 'checking':
@@ -449,7 +580,8 @@
         }
 
         async function testDatabaseConnection() {
-            updateConnectionStatus('checking', 'Testing connection...');
+            updateConnectionStatus('checking', 'Testing...');
+            debug(`Testing bin: ${CONFIG.BIN_ID}`, 'info');
             
             try {
                 const response = await fetch(READ_URL, {
@@ -460,30 +592,83 @@
                     }
                 });
                 
+                debug(`Response: ${response.status} ${response.statusText}`, 'info');
+                
                 if (!response.ok) {
-                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                    const errorText = await response.text();
+                    debug(`Error: ${errorText}`, 'error');
+                    throw new Error(`${response.status}: ${response.statusText}`);
                 }
                 
                 const data = await response.json();
-                console.log('Database connection successful:', data);
-                updateConnectionStatus('online', 'Connected to JSONBin');
-                showToast('Database connection successful', 'success');
+                debug(`Success! Keys: ${Object.keys(data.record || {}).join(', ')}`, 'success');
+                
+                const apps = data.record?.apps?.length || 0;
+                const tickets = data.record?.tickets?.length || 0;
+                debug(`Data: ${apps} apps, ${tickets} tickets`, 'success');
+                
+                updateConnectionStatus('online', 'Connected');
+                showToast('Database connected!', 'success');
                 return true;
                 
             } catch (error) {
-                console.error('Database connection failed:', error);
-                updateConnectionStatus('offline', `Connection failed: ${error.message}`);
-                showToast(`Database error: ${error.message}`, 'error');
+                debug(`Failed: ${error.message}`, 'error');
+                updateConnectionStatus('offline', `Error: ${error.message}`);
+                showToast(`Connection failed: ${error.message}`, 'error');
                 return false;
             }
         }
 
-        // ==========================================
-        // API FUNCTIONS with Enhanced Error Handling
-        // ==========================================
-        
+        // Initialize empty bin structure
+        async function initializeEmptyBin() {
+            debug('Initializing empty bin...', 'info');
+            
+            const emptyData = {
+                apps: [],
+                tickets: [],
+                announcements: [],
+                metadata: { 
+                    initialized: new Date().toISOString(),
+                    initializedBy: currentStaff?.name || 'System'
+                }
+            };
+            
+            try {
+                const response = await fetch(UPDATE_URL, {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-Master-Key': CONFIG.MASTER_KEY
+                    },
+                    body: JSON.stringify(emptyData)
+                });
+                
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    debug(`Init error: ${errorText}`, 'error');
+                    throw new Error(`HTTP ${response.status}`);
+                }
+                
+                debug('Bin initialized successfully!', 'success');
+                showToast('Database initialized!', 'success');
+                await renderAdminData();
+                return true;
+                
+            } catch (error) {
+                debug(`Init failed: ${error.message}`, 'error');
+                showToast(`Failed to initialize: ${error.message}`, 'error');
+                return false;
+            }
+        }
+
         async function getData() {
-            updateConnectionStatus('checking', 'Fetching data...');
+            if (useLocalFallback) {
+                const local = loadLocalData();
+                if (local) return local;
+            }
+            
+            updateConnectionStatus('checking', 'Fetching...');
+            debug('Fetching data...', 'info');
             
             try {
                 const response = await fetch(READ_URL, {
@@ -495,37 +680,67 @@
                 });
                 
                 if (!response.ok) {
-                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                    const errorText = await response.text();
+                    debug(`Fetch error ${response.status}: ${errorText}`, 'error');
+                    
+                    // Handle specific errors
+                    if (response.status === 404) {
+                        debug('Bin not found! Click "Init Bin" to create it.', 'error');
+                        showToast('Database not found. Click "Init Bin" button.', 'error');
+                    } else if (response.status === 401) {
+                        debug('Authentication failed! Check your Master Key.', 'error');
+                        showToast('Authentication failed. Check credentials.', 'error');
+                    }
+                    
+                    throw new Error(`${response.status}: ${response.statusText}`);
                 }
                 
                 const result = await response.json();
+                debug(`Raw response received`, 'info');
                 
-                // Ensure proper data structure
+                // Handle JSONBin v3 structure
+                const record = result.record || {};
+                
                 currentData = {
-                    apps: result.record?.apps || [],
-                    tickets: result.record?.tickets || [],
-                    announcements: result.record?.announcements || [],
-                    metadata: result.record?.metadata || { lastUpdated: new Date().toISOString() }
+                    apps: Array.isArray(record.apps) ? record.apps : [],
+                    tickets: Array.isArray(record.tickets) ? record.tickets : [],
+                    announcements: Array.isArray(record.announcements) ? record.announcements : [],
+                    metadata: record.metadata || { lastUpdated: new Date().toISOString() }
                 };
                 
-                updateConnectionStatus('online', 'Data synced');
+                debug(`Parsed: ${currentData.apps.length} apps, ${currentData.tickets.length} tickets`, 'success');
+                
+                saveLocalData();
+                updateConnectionStatus('online', 'Synced');
                 return currentData;
                 
             } catch (error) {
-                console.error('Error fetching data:', error);
-                updateConnectionStatus('offline', 'Sync failed');
-                showToast(`Failed to load data: ${error.message}`, 'error');
+                debug(`Fetch failed: ${error.message}`, 'error');
+                updateConnectionStatus('offline', 'Failed - using local');
                 
-                // Return cached data if available
+                const local = loadLocalData();
+                if (local) {
+                    currentData = local;
+                    useLocalFallback = true;
+                    return currentData;
+                }
+                
                 return currentData;
             }
         }
         
         async function saveData(data) {
+            if (useLocalFallback) {
+                currentData = data;
+                saveLocalData();
+                showToast('Saved locally (offline)', 'info');
+                return true;
+            }
+            
             updateConnectionStatus('checking', 'Saving...');
+            debug('Saving data...', 'info');
             
             try {
-                // Ensure data has proper structure
                 const payload = {
                     apps: data.apps || [],
                     tickets: data.tickets || [],
@@ -546,26 +761,31 @@
                 });
                 
                 if (!response.ok) {
-                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                    const errorText = await response.text();
+                    debug(`Save error: ${errorText}`, 'error');
+                    throw new Error(`${response.status}: ${response.statusText}`);
                 }
                 
-                const result = await response.json();
                 currentData = payload;
-                
-                updateConnectionStatus('online', 'Changes saved');
-                showToast('Data saved successfully', 'success');
+                saveLocalData();
+                debug('Saved to cloud', 'success');
+                updateConnectionStatus('online', 'Saved');
+                showToast('Saved!', 'success');
                 return true;
                 
             } catch (error) {
-                console.error('Error saving data:', error);
-                updateConnectionStatus('offline', 'Save failed');
-                showToast(`Failed to save: ${error.message}`, 'error');
+                debug(`Save failed: ${error.message}`, 'error');
+                updateConnectionStatus('offline', 'Failed - local only');
+                currentData = data;
+                saveLocalData();
+                useLocalFallback = true;
+                showToast('Cloud save failed. Saved locally.', 'error');
                 return false;
             }
         }
 
         // ==========================================
-        // SECURITY: Hashed credentials (SHA-256)
+        // AUTHENTICATION
         // ==========================================
         
         async function sha256(message) {
@@ -588,10 +808,6 @@
             }
         };
 
-        // ==========================================
-        // XSS PROTECTION
-        // ==========================================
-        
         function escapeHtml(text) {
             if (text === null || text === undefined) return '';
             const div = document.createElement('div');
@@ -681,14 +897,13 @@
             setLoading('loginBtn', true);
             errorDiv.classList.add('hidden');
             
-            // Rate limiting check
             const attempts = parseInt(localStorage.getItem('loginAttempts') || '0');
             const lastAttempt = parseInt(localStorage.getItem('lastAttempt') || '0');
             const now = Date.now();
             
             if (attempts >= 5 && now - lastAttempt < 300000) {
                 setLoading('loginBtn', false);
-                errorDiv.textContent = 'Too many attempts. Please try again in 5 minutes.';
+                errorDiv.textContent = 'Too many attempts. Try again in 5 minutes.';
                 errorDiv.classList.remove('hidden');
                 return false;
             }
@@ -705,17 +920,13 @@
                     document.getElementById('staffNameDisplay').innerText = currentStaff.name;
                     document.getElementById('staffRoleDisplay').innerText = currentStaff.role;
                     
-                    // Load data from database
                     await renderAdminData();
                     
-                    // Set up auto-refresh
                     autoRefreshInterval = setInterval(() => {
-                        if (isDatabaseConnected) {
-                            renderAdminData(false);
-                        }
+                        if (isDatabaseConnected) renderAdminData(false);
                     }, 30000);
                     
-                    showToast('Login successful', 'success');
+                    showToast('Login successful!', 'success');
                     addActivity('Login', 'Staff logged in');
                     
                     setLoading('loginBtn', false);
@@ -723,7 +934,6 @@
                 }
             }
             
-            // Failed login
             localStorage.setItem('loginAttempts', (attempts + 1).toString());
             localStorage.setItem('lastAttempt', now.toString());
             
@@ -753,7 +963,7 @@
         }
 
         // ==========================================
-        // ANNOUNCEMENT FUNCTIONS
+        // ANNOUNCEMENTS
         // ==========================================
         
         function toggleAnnouncementForm() {
@@ -766,7 +976,7 @@
             const body = sanitizeInput(document.getElementById('newAnnBody').value.trim());
             
             if (!title || !body) {
-                showToast('Please fill in all fields', 'error');
+                showToast('Fill in all fields', 'error');
                 return;
             }
             
@@ -783,7 +993,6 @@
                 id: Date.now()
             });
             
-            // Keep only last 10 announcements
             if (data.announcements.length > 10) {
                 data.announcements = data.announcements.slice(-10);
             }
@@ -793,7 +1002,7 @@
             setLoading('postAnnBtn', false);
             
             if (success) {
-                showToast('Announcement sent to main site!', 'success');
+                showToast('Announcement sent!', 'success');
                 addActivity('Announcement', `Posted: ${title}`);
                 document.getElementById('newAnnTitle').value = '';
                 document.getElementById('newAnnBody').value = '';
@@ -844,7 +1053,6 @@
             saveExpandedState(expandedState);
         }
 
-        // Filter and sort functions
         let appFilterText = '';
         let appSortMethod = 'newest';
         let ticketFilterText = '';
@@ -911,7 +1119,6 @@
             }
         }
 
-        // Bulk selection
         function toggleSelectAllApps() {
             const checkboxes = document.querySelectorAll('.app-checkbox');
             const selectAll = document.getElementById('selectAllApps').checked;
@@ -919,38 +1126,29 @@
             checkboxes.forEach(cb => {
                 cb.checked = selectAll;
                 const appId = parseInt(cb.dataset.id);
-                if (selectAll) {
-                    selectedApps.add(appId);
-                } else {
-                    selectedApps.delete(appId);
-                }
+                if (selectAll) selectedApps.add(appId);
+                else selectedApps.delete(appId);
             });
             
             updateBulkActions();
         }
 
         function toggleAppSelection(appId) {
-            if (selectedApps.has(appId)) {
-                selectedApps.delete(appId);
-            } else {
-                selectedApps.add(appId);
-            }
+            if (selectedApps.has(appId)) selectedApps.delete(appId);
+            else selectedApps.add(appId);
             updateBulkActions();
         }
 
         function updateBulkActions() {
             const bulkDiv = document.getElementById('bulkActions');
-            if (selectedApps.size > 0) {
-                bulkDiv.classList.remove('hidden');
-            } else {
-                bulkDiv.classList.add('hidden');
-            }
+            if (selectedApps.size > 0) bulkDiv.classList.remove('hidden');
+            else bulkDiv.classList.add('hidden');
         }
 
         async function bulkApprove() {
             showConfirmModal(
                 'Bulk Approve',
-                `Approve ${selectedApps.size} selected applications?`,
+                `Approve ${selectedApps.size} selected?`,
                 async () => {
                     const data = await getData();
                     let count = 0;
@@ -965,8 +1163,8 @@
                     });
                     
                     if (await saveData(data)) {
-                        showToast(`Approved ${count} applications`, 'success');
-                        addActivity('Bulk Approve', `${count} applications`);
+                        showToast(`Approved ${count}`, 'success');
+                        addActivity('Bulk Approve', `${count} apps`);
                         selectedApps.clear();
                         document.getElementById('selectAllApps').checked = false;
                         updateBulkActions();
@@ -979,7 +1177,7 @@
         async function bulkDeny() {
             showConfirmModal(
                 'Bulk Deny',
-                `Deny ${selectedApps.size} selected applications?`,
+                `Deny ${selectedApps.size} selected?`,
                 async () => {
                     const data = await getData();
                     let count = 0;
@@ -994,8 +1192,8 @@
                     });
                     
                     if (await saveData(data)) {
-                        showToast(`Denied ${count} applications`, 'success');
-                        addActivity('Bulk Deny', `${count} applications`);
+                        showToast(`Denied ${count}`, 'success');
+                        addActivity('Bulk Deny', `${count} apps`);
                         selectedApps.clear();
                         document.getElementById('selectAllApps').checked = false;
                         updateBulkActions();
@@ -1010,6 +1208,8 @@
         // ==========================================
         
         async function renderAdminData(showLoading = true) {
+            debug('Rendering admin data...', 'info');
+            
             if (showLoading) {
                 document.getElementById('admin-apps-list').innerHTML = '<div class="skeleton h-20 rounded mb-2"></div><div class="skeleton h-20 rounded mb-2"></div>';
                 document.getElementById('admin-tickets-list').innerHTML = '<div class="skeleton h-20 rounded mb-2"></div><div class="skeleton h-20 rounded mb-2"></div>';
@@ -1017,9 +1217,11 @@
             
             const data = await getData();
             
-            // Update stats
-            document.getElementById('stat-apps').innerText = data.apps.filter(a => a.status === 'Pending').length;
-            document.getElementById('stat-tickets').innerText = data.tickets.filter(t => t.status === 'Open' || t.status === 'Pending Staff').length;
+            const pendingApps = data.apps.filter(a => a.status === 'Pending').length;
+            const openTickets = data.tickets.filter(t => t.status === 'Open' || t.status === 'Pending Staff').length;
+            
+            document.getElementById('stat-apps').innerText = pendingApps;
+            document.getElementById('stat-tickets').innerText = openTickets;
             document.getElementById('stat-total-apps').innerText = data.apps.length;
 
             renderApplications();
@@ -1028,12 +1230,14 @@
 
         function renderApplications() {
             const apps = currentData.apps || [];
+            debug(`Rendering ${apps.length} apps`, 'info');
+            
             const filteredApps = getFilteredAndSortedApps(apps);
             const container = document.getElementById('admin-apps-list');
             const expandedState = loadExpandedState();
 
             if (filteredApps.length === 0) {
-                container.innerHTML = '<div class="text-center text-gray-500 py-4">No applications found</div>';
+                container.innerHTML = '<div class="text-center text-gray-500 py-4">No applications found. Applications will appear here when submitted.</div>';
                 return;
             }
 
@@ -1067,7 +1271,7 @@
                                     <i class="fas fa-times"></i>
                                 </button>
                             ` : `
-                                <button onclick="updateAppStatus(${app.id}, 'Pending')" class="text-yellow-400 hover:text-white text-xs bg-yellow-900/30 px-2 py-1 rounded" title="Reset to Pending">
+                                <button onclick="updateAppStatus(${app.id}, 'Pending')" class="text-yellow-400 hover:text-white text-xs bg-yellow-900/30 px-2 py-1 rounded" title="Reset">
                                     <i class="fas fa-undo"></i>
                                 </button>
                             `}
@@ -1092,12 +1296,14 @@
 
         function renderTickets() {
             const tickets = currentData.tickets || [];
+            debug(`Rendering ${tickets.length} tickets`, 'info');
+            
             const filteredTickets = getFilteredAndSortedTickets(tickets);
             const container = document.getElementById('admin-tickets-list');
             const expandedState = loadExpandedState();
 
             if (filteredTickets.length === 0) {
-                container.innerHTML = '<div class="text-center text-gray-500 py-4">No tickets found</div>';
+                container.innerHTML = '<div class="text-center text-gray-500 py-4">No tickets found. Tickets will appear here when submitted.</div>';
                 return;
             }
 
@@ -1119,7 +1325,7 @@
                         </div>
                         <div class="flex gap-1" onclick="event.stopPropagation()">
                             ${t.status !== 'Closed' ? `
-                                <button onclick="closeTicket('${t.id}')" class="text-gray-400 hover:text-white text-xs bg-gray-800 px-2 py-1 rounded" title="Close Ticket">
+                                <button onclick="closeTicket('${t.id}')" class="text-gray-400 hover:text-white text-xs bg-gray-800 px-2 py-1 rounded" title="Close">
                                     <i class="fas fa-lock"></i>
                                 </button>
                             ` : `
@@ -1145,7 +1351,7 @@
                         </div>
 
                         <div class="flex gap-2 mt-2">
-                            <input type="text" id="admin-reply-${t.id}" placeholder="Type your response..." 
+                            <input type="text" id="admin-reply-${t.id}" placeholder="Type response..." 
                                 class="flex-1 bg-gray-900 border border-gray-700 rounded px-2 py-1 text-xs text-white focus:border-emerald-500 focus:outline-none">
                             <button onclick="event.stopPropagation(); addAdminReply('${t.id}')" 
                                 class="bg-emerald-700 hover:bg-emerald-600 text-white px-3 py-1 rounded text-xs font-bold">
@@ -1165,7 +1371,7 @@
         async function updateAppStatus(id, status) {
             showConfirmModal(
                 `${status} Application`,
-                `Are you sure you want to ${status.toLowerCase()} this application?`,
+                `Are you sure?`,
                 async () => {
                     const data = await getData();
                     const app = data.apps.find(a => a.id === id);
@@ -1212,7 +1418,7 @@
         async function closeTicket(ticketId) {
             showConfirmModal(
                 'Close Ticket',
-                'Are you sure you want to close this ticket?',
+                'Are you sure?',
                 async () => {
                     const data = await getData();
                     const ticket = data.tickets.find(t => t.id === ticketId);
@@ -1245,7 +1451,7 @@
         }
 
         // ==========================================
-        // EXPORT FUNCTIONALITY
+        // EXPORT
         // ==========================================
         
         function exportToCSV() {
@@ -1279,16 +1485,19 @@
         // ==========================================
         
         window.addEventListener('DOMContentLoaded', async () => {
-            // Test database connection on load
+            debug('Staff Portal initializing...', 'info');
+            debug(`Bin ID: ${CONFIG.BIN_ID}`, 'info');
+            
+            // Don't log full key for security, just first/last few chars
+            const keyPreview = CONFIG.MASTER_KEY.substring(0, 10) + '...' + CONFIG.MASTER_KEY.substring(CONFIG.MASTER_KEY.length - 5);
+            debug(`Master Key: ${keyPreview}`, 'info');
+            
             await testDatabaseConnection();
             renderActivityLog();
         });
 
-        // Cleanup on page unload
         window.addEventListener('beforeunload', () => {
-            if (autoRefreshInterval) {
-                clearInterval(autoRefreshInterval);
-            }
+            if (autoRefreshInterval) clearInterval(autoRefreshInterval);
         });
     </script>
 </body>
